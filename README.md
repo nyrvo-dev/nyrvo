@@ -328,6 +328,16 @@ recording values means credentials never end up in a file you share in a bug
 report or commit by accident. Snapshot files are written with 0600 permissions
 so they remain owner-readable.
 
+## Platforms
+
+Verified on Linux and macOS: CI runs the suite on both, across Go 1.25 and 1.26.
+
+Nyrvo builds for Windows and is written to work there — paths are handled with
+`filepath`, and the system collector already degrades when `uname` is absent,
+which is exactly the Windows case. It has nonetheless never been *run* there, so
+it is not claimed as supported: the point of this tool is not asserting things
+nobody checked. Verifying it is tracked as work, not as a footnote.
+
 ## Development
 
 Run the full local checks with `make check` (test, race detector, vet, gofmt

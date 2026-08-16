@@ -11,20 +11,16 @@ not.
 
 ## [Unreleased]
 
-### Fixed
+Nothing yet.
 
-- `golangci-lint-action` upgraded to v7, which is the first release able to
-  install golangci-lint v2. v6 rejected the pinned version outright.
-- Two tests depended on the platform they ran on. One diagnosed a Linux fixture
-  against a live capture and passed on macOS while failing on the Linux runner;
-  the other compared a machine against itself and asserted findings it could
-  never have.
+## [0.1.0] — 2026-08-16
 
-## [0.1.0] — unreleased
+First tagged version. Everything below is listed as one release rather than as
+invented history, because there is no earlier version anyone could be upgrading
+from.
 
-First tagged version. Everything below is what `0.1.0` will contain; it is
-listed as one release rather than as invented history, because there is no
-earlier version anyone could be upgrading from.
+Verified on Linux and macOS. It builds for Windows and has never been run there,
+so Windows is not claimed as supported.
 
 ### Added
 
@@ -58,6 +54,11 @@ earlier version anyone could be upgrading from.
   `os.UserConfigDir()/nyrvo/config.json`. `ai.agent` sets the default agent, so
   `--ai` alone runs it. There is deliberately no project-level config.
 - `nyrvo list`, `nyrvo version`.
+
+### Notes
+
+- `golangci-lint-action` is pinned to v7, the first release able to install
+  golangci-lint v2.
 
 ### Security
 

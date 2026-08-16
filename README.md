@@ -8,8 +8,9 @@ application behaves differently across local, CI, staging, and production.
 Early development. The commands listed under [Usage](#usage) are what works
 today: capture, diff, reading CI configuration, importing a run that happened,
 and deterministic diagnosis. `nyrvo ci replay` prints what a job does; it never
-runs it. Not yet available: database collectors, executing anything on your
-behalf, and the optional AI layer.
+runs it, and `nyrvo doctor --ai` prints a request for your own agent without
+calling one. Not yet available: database collectors, executing anything on your
+behalf, and adapters that run an installed agent for you.
 
 ## Why
 
@@ -134,6 +135,50 @@ tilde ranges, wildcards (`"20.x"`), bare prefixes, and comma- or space-separated
 conjunctions with `||` alternatives. A constraint it cannot fully parse —
 `lts/iron`, `workspace:*`, a hyphen range — produces no finding rather than a
 guess.
+
+### Asking your own AI agent
+
+`nyrvo doctor --ai` prints the deterministic report, then an analysis request to
+hand to whatever agent you already use:
+
+```
+$ nyrvo doctor --ai
+NYRVO DOCTOR
+...
+2 findings: 2 high
+
+AI ANALYSIS REQUEST (NOT EXECUTED)
+
+This is a request for analysis, not output from a model.
+
+DISCLOSURE
+  Agent      No agent was selected or run.
+  Data       Two environment snapshots, their differences, and Nyrvo's own findings.
+  Execution  Nothing was executed, and nothing left this machine.
+  Command    No command was invoked.
+  Privacy    Environment variable values are never recorded, and only the names this diagnosis refers to are included.
+  Paths      Home directory prefixes in paths are replaced with ~.
+
+----- BEGIN AI REQUEST -----
+...
+----- END AI REQUEST -----
+```
+
+Nyrvo gathers the evidence; your agent reasons about it. No model is called, no
+network request is made, and the package that builds the request cannot make
+one — so Nyrvo owns no API credentials and is tied to no vendor. `nyrvo doctor`
+without the flag never produces a request at all.
+
+What the request carries is chosen rather than inherited. A snapshot has no
+field able to hold an environment variable's value, so a request cannot carry
+one; on top of that the home directory prefix of a runtime path becomes `~`, and
+the environment variable names are reduced to the ones a difference or a finding
+actually refers to — on a laptop that is typically one name out of seventy.
+
+`--ai --json` prints the request as a single document with `"executed": false`,
+replacing the diagnosis document rather than following it: two JSON documents on
+one stream is not something a consumer can parse, and the request already
+carries the findings.
 
 ### Reproducing a CI job
 

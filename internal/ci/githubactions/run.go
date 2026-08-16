@@ -290,6 +290,11 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 	// it if the job's log turns out to name the versions, so a snapshot never
 	// carries a caveat that its own contents disprove.
 	notes = append(notes, runtimesFromLogNote)
+	// Without this note the services section is simply empty, and an empty
+	// section reads as "this job needed no backing containers". A run's metadata
+	// does not list them; the workflow file does, which is what `nyrvo ci
+	// capture` reads.
+	notes = append(notes, servicesNotInRunNote)
 
 	ref := j.URL
 	if ref == "" {
@@ -309,3 +314,8 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 // reports no installed versions. ApplyJobLog deletes it when the job's log
 // supplies them, so the note and the snapshot never contradict each other.
 const runtimesFromLogNote = "Run metadata does not report installed runtime versions; they are read from the job log when one is available."
+
+// servicesNotInRunNote keeps an empty services section from being read as a
+// claim. A job may well have had service containers; the run API does not say
+// so, and silence about them is not evidence they were absent.
+const servicesNotInRunNote = "Run metadata does not report service containers; run `nyrvo ci capture <job>` to read the ones the workflow declares."

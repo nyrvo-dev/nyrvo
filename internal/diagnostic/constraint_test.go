@@ -129,3 +129,55 @@ func TestRequirementMetImpreciseVersion(t *testing.T) {
 		})
 	}
 }
+
+func TestSpacedComparatorsAreOneTerm(t *testing.T) {
+	// Rubygems and Composer both write the spaced form. Split on whitespace, it
+	// became a bare ">=" that decides nothing plus a bare "3.1" read as a
+	// prefix — which then convicted every 3.3.0 in existence.
+	cases := []struct {
+		constraint, observed string
+		met, decided         bool
+	}{
+		{">= 3.1", "3.3.0", true, true},
+		{">= 3.1", "3.0.0", false, true},
+		{">=3.1", "3.3.0", true, true},
+		{"^ 8.2", "8.5.9", true, true},
+		{">= 8.1, < 9.0", "8.5.9", true, true},
+		{">= 8.1, < 9.0", "9.1.0", false, true},
+	}
+	for _, tc := range cases {
+		met, decided := SatisfiesConstraint(tc.constraint, tc.observed)
+		if met != tc.met || decided != tc.decided {
+			t.Errorf("SatisfiesConstraint(%q, %q) = (%v, %v), want (%v, %v)",
+				tc.constraint, tc.observed, met, decided, tc.met, tc.decided)
+		}
+	}
+}
+
+func TestPessimisticOperatorIsNotTheTilde(t *testing.T) {
+	// "~> 3.1" allows every 3.x and stops at 4.0; "~3.1" stops at 3.2. Reading
+	// one as the other rejects the versions the declaration exists to allow.
+	cases := []struct {
+		constraint, observed string
+		met                  bool
+	}{
+		{"~> 3.1", "3.3.0", true},
+		{"~> 3.1", "3.1.0", true},
+		{"~> 3.1", "4.0.0", false},
+		{"~> 3.1", "3.0.9", false},
+		{"~> 3.1.4", "3.1.9", true},
+		{"~> 3.1.4", "3.2.0", false},
+		{"~3.1", "3.1.9", true},
+		{"~3.1", "3.2.0", false},
+	}
+	for _, tc := range cases {
+		met, decided := SatisfiesConstraint(tc.constraint, tc.observed)
+		if !decided {
+			t.Errorf("SatisfiesConstraint(%q, %q) was undecided; the operator is well defined", tc.constraint, tc.observed)
+			continue
+		}
+		if met != tc.met {
+			t.Errorf("SatisfiesConstraint(%q, %q) = %v, want %v", tc.constraint, tc.observed, met, tc.met)
+		}
+	}
+}

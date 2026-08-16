@@ -1,6 +1,9 @@
 package diagnostic
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // SatisfiesConstraint reports whether an observed version meets a version
 // constraint a project declared, and whether that question could be answered at
@@ -55,7 +58,7 @@ func SatisfiesConstraint(constraint, observed string) (met, decided bool) {
 // satisfiesAll evaluates one alternative: a conjunction of terms separated by
 // commas or spaces, as in ">=18.0.0 <21".
 func satisfiesAll(alt string, v []int) (met, decided bool) {
-	terms := strings.FieldsFunc(alt, func(r rune) bool {
+	terms := strings.FieldsFunc(spacedOperator.ReplaceAllString(alt, "$1"), func(r rune) bool {
 		return r == ',' || r == ' ' || r == '\t'
 	})
 	if len(terms) == 0 {
@@ -79,6 +82,13 @@ func satisfiesAll(alt string, v []int) (met, decided bool) {
 	return true, true
 }
 
+// spacedOperator matches a comparator separated from its version by spaces.
+// Splitting on whitespace before joining them apart makes ">= 3.1" two terms:
+// a bare ">=" that decides nothing and a bare "3.1" read as a prefix, which
+// then convicts 3.3.0. Rubygems and Composer both write the spaced form, so
+// this is the common spelling rather than an exotic one.
+var spacedOperator = regexp.MustCompile(`(>=|<=|~>|[<>=^~])\s+`)
+
 // satisfiesTerm evaluates a single comparator-and-version term.
 func satisfiesTerm(term string, v []int) (met, decided bool) {
 	term = strings.TrimSpace(term)
@@ -88,7 +98,9 @@ func satisfiesTerm(term string, v []int) (met, decided bool) {
 	}
 
 	op := ""
-	for _, candidate := range []string{">=", "<=", "^", "~", ">", "<", "="} {
+	// Longer operators are tried first: "~>" must not be read as "~" with a
+	// stray ">" left on the version.
+	for _, candidate := range []string{">=", "<=", "~>", "^", "~", ">", "<", "="} {
 		if strings.HasPrefix(term, candidate) {
 			op = candidate
 			term = strings.TrimPrefix(term, candidate)
@@ -119,6 +131,12 @@ func satisfiesTerm(term string, v []int) (met, decided bool) {
 		return withinRange(v, r, caretUpper(r)), true
 	case "~":
 		return withinRange(v, r, tildeUpper(r)), true
+	case "~>":
+		// Rubygems' pessimistic operator is not npm's tilde. "~> 3.1" allows
+		// every 3.x and stops at 4.0, while "~3.1" stops at 3.2. Mapping one
+		// onto the other rejects the versions the declaration was written to
+		// allow.
+		return withinRange(v, r, pessimisticUpper(r)), true
 	default:
 		// A bare version is a prefix, not an exact demand: engines.node "20"
 		// admits 20.11.1, and .nvmrc "20.11.1" admits exactly that. This is the
@@ -144,6 +162,16 @@ func caretUpper(r []int) []int {
 		}
 	}
 	return bump(r, len(r)-1)
+}
+
+// pessimisticUpper is the exclusive bound of Rubygems' "~>": the last declared
+// segment is dropped and the one before it is raised, so "~> 3.1" bounds at 4.0
+// and "~> 3.1.4" bounds at 3.2.0.
+func pessimisticUpper(r []int) []int {
+	if len(r) <= 1 {
+		return bump(r, 0)
+	}
+	return bump(r[:len(r)-1], len(r)-2)
 }
 
 // tildeUpper is the first version a tilde range excludes: tilde pins the minor

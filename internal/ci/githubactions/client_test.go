@@ -276,3 +276,34 @@ func TestFetchRunContext(t *testing.T) {
 		}
 	}
 }
+
+// A bare run id needs gh to resolve the repository from the working directory.
+// Outside a checkout gh reports a placeholder it cannot expand, which is
+// accurate and useless on its own, so Nyrvo adds what to do instead — while
+// keeping gh's own message.
+func TestFetchRunHintsWhenRepositoryCannotBeResolved(t *testing.T) {
+	ghErr := errors.New("unable to expand placeholder in path: failed to run git: fatal: not a git repository")
+	c := &Client{Exec: func(context.Context, ...string) ([]byte, error) { return nil, ghErr }}
+
+	_, _, _, err := c.FetchRun(context.Background(), "123456789")
+	if err == nil {
+		t.Fatal("FetchRun returned nil error")
+	}
+	if !strings.Contains(err.Error(), "run URL") {
+		t.Errorf("error should suggest passing the run URL, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "not a git repository") {
+		t.Errorf("gh's own message must be kept, got: %v", err)
+	}
+
+	// The hint is only for the unresolved-repository case: a 404 must not be
+	// dressed up as a repository problem.
+	c = &Client{Exec: func(context.Context, ...string) ([]byte, error) {
+		return nil, errors.New("gh: Not Found (HTTP 404)")
+	}}
+	if _, _, _, err := c.FetchRun(context.Background(), "https://github.com/cli/cli/actions/runs/1"); err == nil {
+		t.Fatal("FetchRun returned nil error")
+	} else if strings.Contains(err.Error(), "run URL") {
+		t.Errorf("a 404 should not suggest the run URL, got: %v", err)
+	}
+}

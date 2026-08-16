@@ -103,7 +103,7 @@ func (c *Client) FetchRun(ctx context.Context, arg string) (runJSON, jobsJSON []
 
 	runJSON, err = c.exec(ctx, "api", r.path())
 	if err != nil {
-		return nil, nil, "", fmt.Errorf("fetch %s: %w", r, err)
+		return nil, nil, "", fmt.Errorf("fetch %s: %w", r, hintUnresolvedRepo(r, err))
 	}
 	// --paginate matters: a matrix run easily exceeds one page of jobs, and a
 	// silently truncated job list would make Nyrvo report that a job does not
@@ -116,6 +116,21 @@ func (c *Client) FetchRun(ctx context.Context, arg string) (runJSON, jobsJSON []
 		return nil, nil, "", fmt.Errorf("fetch jobs for %s: %w", r, err)
 	}
 	return runJSON, jobsJSON, r.String(), nil
+}
+
+// hintUnresolvedRepo adds the missing half of gh's answer.
+//
+// A bare run id relies on gh resolving the repository from the working
+// directory, so outside a checkout gh reports that it cannot expand a
+// placeholder — accurate, and useless to someone who just wanted to paste a run
+// id. The hint says what to do instead. gh's own message is kept: if this
+// string match ever stops matching, the user still sees the real error and only
+// loses the suggestion.
+func hintUnresolvedRepo(r runRef, err error) error {
+	if r.Repo != "" || !strings.Contains(err.Error(), "unable to expand placeholder") {
+		return err
+	}
+	return fmt.Errorf("%w\nrun this inside the repository, or pass the full run URL (https://github.com/owner/repo/actions/runs/%s)", err, r.ID)
 }
 
 // ghExec runs the gh CLI with an argument vector and no shell.

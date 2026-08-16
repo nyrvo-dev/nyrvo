@@ -133,20 +133,49 @@ func TestCollectPreservesExistingRuntimes(t *testing.T) {
 	}
 }
 
-func TestJavaAsksForTheVersionOnStdout(t *testing.T) {
+func TestJavaProbesBothSpellingsAndAsksForStderrOnlyWhereItAnswers(t *testing.T) {
 	c, ok := Java().(*runtimeCollector)
 	if !ok {
 		t.Fatal("Java() no longer returns the shared collector")
 	}
-	// `java -version` writes to stderr, which collector.Run does not read: the
-	// probe would return empty and be reported as an unparseable version rather
-	// than as a missing runtime. Only --version answers on stdout.
-	for _, p := range c.probes {
-		for _, arg := range p.args {
-			if arg == "-version" {
-				t.Fatalf("java probed with %q, which writes to stderr", arg)
-			}
-		}
+	if len(c.probes) != 2 {
+		t.Fatalf("java has %d probes, want --version first and -version as the JDK 8 fallback", len(c.probes))
+	}
+	// --version answers on stdout like every other runtime and must be tried
+	// first; -version is the older spelling that answers on stderr, and reading
+	// stderr has to be asked for deliberately or any tool's warning becomes a
+	// version.
+	if c.probes[0].args[0] != "--version" || c.probes[0].stderr {
+		t.Errorf("first probe = %+v, want --version without stderr", c.probes[0])
+	}
+	if c.probes[1].args[0] != "-version" || !c.probes[1].stderr {
+		t.Errorf("second probe = %+v, want -version with stderr", c.probes[1])
+	}
+}
+
+func TestStderrIsReadOnlyWhenTheProbeAsksForIt(t *testing.T) {
+	dir := t.TempDir()
+	// A JDK 8 answering the only way it can.
+	script := filepath.Join(dir, "nyrvo-oldjava")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'openjdk version \"1.8.0_402\"' >&2\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	asking := newCollector("java", probe{binary: "nyrvo-oldjava", args: []string{"-version"}, stderr: true})
+	snap := snapshot.New("local", time.Time{})
+	if err := asking.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 || snap.Runtimes[0].Version != "1.8.0" {
+		t.Fatalf("runtimes = %+v, want the version read from stderr", snap.Runtimes)
+	}
+
+	// The same output without the flag must not be mistaken for an answer.
+	notAsking := newCollector("java", probe{binary: "nyrvo-oldjava", args: []string{"-version"}})
+	snap = snapshot.New("local", time.Time{})
+	if err := notAsking.Collect(context.Background(), snap); !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want ErrUnavailable when stderr was not asked for", err)
 	}
 }
 

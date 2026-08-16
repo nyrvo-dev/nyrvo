@@ -29,6 +29,13 @@ import (
 type probe struct {
 	binary string
 	args   []string
+	// stderr asks for the tool's stderr as well. Only tools that genuinely
+	// answer there set it: `java -version` on a JDK older than 9 writes the
+	// version to stderr and nothing to stdout, so without this a machine with
+	// Java 8 reports no Java at all. It is per-probe rather than a general
+	// fallback because reading stderr whenever stdout is empty would take any
+	// tool's warning for a version.
+	stderr bool
 }
 
 // runtimeCollector is a single Collector implementation covering every runtime.
@@ -78,7 +85,10 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 			}
 			return err
 		}
-		out, err := collector.Run(ctx, p.binary, p.args...)
+		out, errOut, err := collector.RunOutput(ctx, p.binary, p.args...)
+		if err == nil && out == "" && p.stderr {
+			out = errOut
+		}
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				// A cancelled capture is the caller's own failure and must never
@@ -182,13 +192,18 @@ func Rust() collector.Collector {
 
 // Java returns a collector for the Java runtime.
 //
-// It uses --version rather than the older -version because -version writes to
-// stderr, which collector.Run does not read: the probe would come back empty
-// and be reported as an unparseable version rather than as a missing runtime.
-// The consequence is that a JDK older than 9, which has no --version, is seen
-// as absent. That is the honest failure of the two.
+// --version is tried first because it answers on stdout like every other
+// runtime. A JDK older than 9 does not have it and writes its version to stderr
+// under -version, so that spelling is the fallback and asks for stderr
+// explicitly.
 func Java() collector.Collector {
-	return newCollector("java", probe{binary: "java", args: []string{"--version"}})
+	return newCollector("java",
+		probe{binary: "java", args: []string{"--version"}},
+		// A JDK older than 9 has no --version and answers -version on stderr.
+		// Java 8 is still widely deployed and setup-java still installs it, so
+		// reporting such a machine as having no Java would be a plain untruth.
+		probe{binary: "java", args: []string{"-version"}, stderr: true},
+	)
 }
 
 // Python returns a collector for the Python runtime. It probes "python3" first

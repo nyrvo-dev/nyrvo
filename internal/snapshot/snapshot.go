@@ -52,6 +52,10 @@ const (
 	// describes the environment a job is *expected* to run in, which is not
 	// the same as having watched it run.
 	SourceGitHubActions = "github-actions"
+	// SourceGitHubActionsRun marks a snapshot derived from a run that actually
+	// happened. It reports what a job really got — the commit that was checked
+	// out, the runner it landed on — rather than what the file asked for.
+	SourceGitHubActionsRun = "github-actions-run"
 )
 
 // Source describes where a snapshot's observations came from.

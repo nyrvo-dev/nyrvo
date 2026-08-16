@@ -74,7 +74,7 @@ func Prompt(in Input) string {
 func writeEnvironment(b *strings.Builder, label string, s *snapshot.Snapshot) {
 	if s == nil {
 		fmt.Fprintf(b, "\n%s: name=(not recorded); source kind=(not recorded)\n", label)
-		b.WriteString("  system: not observed\n  git: not observed\n  docker: not observed\n  runtimes: not observed\n  project requirements: not observed\n  environment variable names: not observed\n")
+		b.WriteString("  system: not observed\n  git: not observed\n  docker: not observed\n  runtimes: not observed\n  services: not observed\n  project requirements: not observed\n  environment variable names: not observed\n")
 		return
 	}
 
@@ -109,6 +109,24 @@ func writeEnvironment(b *strings.Builder, label string, s *snapshot.Snapshot) {
 			// same version from different installs is a real cause of drift, and
 			// the path is already sanitized on the way into the Input.
 			fmt.Fprintf(b, "    - %s version=%s path=%s\n", display(rt.Name), display(rt.Version), display(rt.Path))
+		}
+	}
+	// A job's backing containers are frequently the whole answer — a suite that
+	// cannot reach a database fails for a reason no version comparison shows —
+	// so omitting them left an agent reasoning about the wrong evidence.
+	if len(s.Services) == 0 {
+		b.WriteString("  services: none observed or declared\n")
+	} else {
+		b.WriteString("  services:\n")
+		for _, svc := range s.Services {
+			line := "    - " + display(svc.Image)
+			if svc.ID != "" {
+				line += " (reached as " + svc.ID + ")"
+			}
+			if len(svc.Ports) > 0 {
+				line += " published on " + strings.Join(svc.Ports, ", ")
+			}
+			b.WriteString(line + "\n")
 		}
 	}
 	if len(s.Requirements) == 0 {

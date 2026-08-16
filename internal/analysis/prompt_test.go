@@ -179,3 +179,28 @@ func TestPromptDistinguishesAWholeComponentDifference(t *testing.T) {
 		t.Errorf("Prompt() reported a whole-component difference as a gap in Nyrvo's bookkeeping:\n%s", got)
 	}
 }
+
+func TestPromptCarriesServices(t *testing.T) {
+	// A suite that cannot reach its database fails for a reason no version
+	// comparison shows. Leaving services out sent the agent to the wrong
+	// evidence.
+	got := Prompt(Input{
+		A: &snapshot.Snapshot{
+			Name:     "local",
+			Services: []snapshot.Service{{Image: "axllent/mailpit:latest", Ports: []string{"1025"}}},
+		},
+		B: &snapshot.Snapshot{
+			Name:     "ci",
+			Services: []snapshot.Service{{ID: "db", Image: "postgres:16"}},
+		},
+	})
+	for _, want := range []string{
+		"postgres:16 (reached as db)",
+		"axllent/mailpit:latest",
+		"published on 1025",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Prompt() does not contain %q:\n%s", want, got)
+		}
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -117,6 +118,39 @@ func (c *Client) FetchRun(ctx context.Context, arg string) (runJSON, jobsJSON []
 	}
 	return runJSON, jobsJSON, r.String(), nil
 }
+
+// FetchJobLog returns the raw log of one job.
+//
+// repo must be "owner/name" as reported by the API, and jobID is an integer, so
+// neither can carry anything unexpected into the path.
+//
+// Job logs are terminal output: they contain ANSI escape sequences, which is
+// why gh refuses to emit them without --allow-escape-sequences. Nyrvo asks for
+// them anyway — the log is the evidence — and strips the escapes before any of
+// it is stored or shown, so nothing that reaches a terminal can move the cursor
+// or hide text. See docs/adr/0011.
+func (c *Client) FetchJobLog(ctx context.Context, repo string, jobID int64) ([]byte, error) {
+	if !repoPattern.MatchString(repo) {
+		return nil, fmt.Errorf("%q is not an owner/name repository", repo)
+	}
+	path := "repos/" + repo + "/actions/jobs/" + strconv.FormatInt(jobID, 10) + "/logs"
+
+	log, err := c.exec(ctx, "api", "--allow-escape-sequences", path)
+	if err == nil {
+		return log, nil
+	}
+	// Older gh releases have no such flag and no such refusal: they simply emit
+	// the log. Retrying without it keeps those versions working instead of
+	// requiring an upgrade for a flag that only exists to protect terminals.
+	if strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "--allow-escape-sequences") {
+		return c.exec(ctx, "api", path)
+	}
+	return nil, fmt.Errorf("fetch log for job %d: %w", jobID, err)
+}
+
+// repoPattern is what the API's repository.full_name may look like before it is
+// placed in a request path.
+var repoPattern = regexp.MustCompile(`^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$`)
 
 // hintUnresolvedRepo adds the missing half of gh's answer.
 //

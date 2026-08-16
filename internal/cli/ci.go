@@ -19,6 +19,11 @@ import (
 // documented `nyrvo diff local ci` works without the user inventing a name.
 const ciSnapshotName = "ci"
 
+// newCIClient builds the GitHub client. It is a variable so tests can supply a
+// client with a stubbed Exec and drive the whole import command without a
+// network or a token.
+var newCIClient = func() *githubactions.Client { return &githubactions.Client{} }
+
 func runCI(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
 		return usageErr("ci needs a subcommand: inspect, capture or import")
@@ -50,7 +55,7 @@ func runCIImport(ctx context.Context, args []string, stdout io.Writer) error {
 		return usageErr("ci import takes a run id or run URL, and optionally a job name")
 	}
 
-	client := &githubactions.Client{}
+	client := newCIClient()
 	runJSON, jobsJSON, ref, err := client.FetchRun(ctx, operands[0])
 	if err != nil {
 		return err
@@ -69,12 +74,35 @@ func runCIImport(ctx context.Context, args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+
+	// The log is what turns an imported run from metadata into evidence: the
+	// versions the runner really installed and the error that stopped the job.
+	// It is also the part most likely to be unavailable — logs expire, and a
+	// token may not reach them — so a log that cannot be read degrades the
+	// import to a note instead of failing it.
+	logNote := ""
+	if rawLog, logErr := client.FetchJobLog(ctx, run.Repository, job.ID); logErr != nil {
+		logNote = "The job log could not be read, so installed runtime versions and the failing output are missing: " + logErr.Error()
+		snap.Source.Notes = append(snap.Source.Notes, logNote)
+		snap.Normalize()
+	} else {
+		githubactions.ApplyJobLog(snap, githubactions.ParseJobLog(rawLog))
+	}
+
 	if err := snapshot.NewStore("").Save(snap); err != nil {
 		return err
 	}
 
-	_, err = fmt.Fprintf(stdout, "Imported %s job %q (%s).\nSnapshot saved: %s, replacing any previous %s snapshot.\n\nDiagnose it against this machine:\n  nyrvo capture local\n  nyrvo doctor\n",
-		ref, job.Name, why, ciSnapshotName, ciSnapshotName)
+	if _, err := fmt.Fprintf(stdout, "Imported %s job %q (%s).\nSnapshot saved: %s, replacing any previous %s snapshot.\n",
+		ref, job.Name, why, ciSnapshotName, ciSnapshotName); err != nil {
+		return err
+	}
+	if logNote != "" {
+		if _, err := fmt.Fprintf(stdout, "\nWarning: %s\n", logNote); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(stdout, "\nDiagnose it against this machine:\n  nyrvo capture local\n  nyrvo doctor\n")
 	return err
 }
 

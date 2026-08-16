@@ -1,0 +1,15 @@
+# Build output
+/bin/
+
+# Nyrvo snapshots
+.nyrvo/
+
+# Go
+*.test
+*.out
+vendor/
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/

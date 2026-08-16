@@ -366,25 +366,38 @@ func TestSnapshotNeverStoresEnvValues(t *testing.T) {
 	}
 }
 
-func TestSnapshotServicesNoted(t *testing.T) {
-	suffix := "; services are not modelled as a snapshot section yet"
+func TestSnapshotServicesRecordedAsASection(t *testing.T) {
 	tests := []struct {
-		name     string
-		services []Service
-		want     []string // expected service notes, in order
+		name      string
+		services  []Service
+		want      []snapshot.Service
+		wantNotes []string
 	}{
-		{name: "no services", services: nil, want: nil},
-		{name: "service without image", services: []Service{{ID: "redis"}}, want: []string{`job declares service "redis"` + suffix}},
-		{name: "one service with image", services: []Service{{ID: "postgres", Image: "postgres:16"}}, want: []string{`job declares service "postgres" (image postgres:16)` + suffix}},
+		{name: "no services", services: nil},
 		{
-			name: "two services in ID order",
+			// A service the workflow names but gives no image is still a
+			// dependency the job has. Dropping it silently would hide it; there
+			// is simply nothing for a rule to match against.
+			name:      "service without image",
+			services:  []Service{{ID: "redis"}},
+			wantNotes: []string{`job declares service "redis" with no image; nothing to compare against`},
+		},
+		{
+			name:     "one service with image",
+			services: []Service{{ID: "postgres", Image: "postgres:16"}},
+			want:     []snapshot.Service{{ID: "postgres", Image: "postgres:16"}},
+		},
+		{
+			name: "two services",
 			services: []Service{
+				{ID: "redis", Image: "redis:7"},
+				{ID: "postgres", Image: "postgres:16"},
+			},
+			// Normalize sorts by image, so the declaration order in the file
+			// cannot make two captures of one workflow differ.
+			want: []snapshot.Service{
 				{ID: "postgres", Image: "postgres:16"},
 				{ID: "redis", Image: "redis:7"},
-			},
-			want: []string{
-				`job declares service "postgres" (image postgres:16)` + suffix,
-				`job declares service "redis" (image redis:7)` + suffix,
 			},
 		},
 	}
@@ -395,14 +408,17 @@ func TestSnapshotServicesNoted(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Snapshot: %v", err)
 			}
-			var got []string
+			if !reflect.DeepEqual(snap.Services, tt.want) {
+				t.Errorf("services = %+v, want %+v", snap.Services, tt.want)
+			}
+			var notes []string
 			for _, n := range snap.Source.Notes {
 				if strings.HasPrefix(n, "job declares service") {
-					got = append(got, n)
+					notes = append(notes, n)
 				}
 			}
-			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("service notes = %q, want %q", got, tt.want)
+			if !reflect.DeepEqual(notes, tt.wantNotes) {
+				t.Errorf("service notes = %q, want %q", notes, tt.wantNotes)
 			}
 		})
 	}

@@ -279,18 +279,22 @@ func applyEnvironment(snap *snapshot.Snapshot, j *Job) {
 	snap.PartialRuntimes = true
 }
 
-// applyServices records every service a job declares. Services are not modelled
-// as a snapshot section yet — there is no container or database section — so
-// each one is surfaced as a note: the rule is that anything Nyrvo recognizes
-// but does not model must stay visible, otherwise a diff would silently ignore
-// a dependency the job actually needs. Notes are appended in service ID order,
-// the order the workflow declares them.
+// applyServices records every service a job declares as a snapshot section.
+//
+// These used to be flattened into notes, because the rule is that anything
+// Nyrvo recognizes but does not model must stay visible. Now that there is a
+// section they belong in it: a note keeps a dependency readable, but only a
+// section lets a rule ask whether this machine provides it.
+//
+// A service without an image is still recorded. The workflow named a dependency
+// the job needs, and dropping it because one field is missing would hide the
+// dependency entirely; the note says what could not be read.
 func applyServices(snap *snapshot.Snapshot, j *Job, notes *[]string) {
 	for _, svc := range j.Services {
-		note := "job declares service " + strconv.Quote(svc.ID)
-		if svc.Image != "" {
-			note += " (image " + svc.Image + ")"
+		if svc.Image == "" {
+			*notes = append(*notes, "job declares service "+strconv.Quote(svc.ID)+" with no image; nothing to compare against")
+			continue
 		}
-		*notes = append(*notes, note+"; services are not modelled as a snapshot section yet")
+		snap.Services = append(snap.Services, snapshot.Service{ID: svc.ID, Image: svc.Image})
 	}
 }

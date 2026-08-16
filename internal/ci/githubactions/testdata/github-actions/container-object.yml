@@ -1,0 +1,10 @@
+name: Container object form
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container:
+      image: node:24
+      options: --cpus 2
+    steps:
+      - run: npm test

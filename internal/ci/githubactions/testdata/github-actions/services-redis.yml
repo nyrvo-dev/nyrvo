@@ -1,0 +1,12 @@
+name: Redis services
+on: push
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        env:
+          REDIS_PORT: 6379
+    steps:
+      - run: redis-cli ping

@@ -1,0 +1,11 @@
+name: Step environment
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Say something
+        run: echo hello
+        env:
+          FOO: bar
+          BAZ: qux

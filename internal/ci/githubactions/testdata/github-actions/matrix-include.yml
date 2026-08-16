@@ -1,0 +1,14 @@
+name: Matrix with include
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+        node: [20]
+        include:
+          - os: macos-latest
+            node: 22
+    steps:
+      - run: npm test

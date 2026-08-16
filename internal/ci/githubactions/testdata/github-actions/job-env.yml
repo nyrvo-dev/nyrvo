@@ -1,0 +1,11 @@
+name: Job environment
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      CI: "true"
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - run: npm test

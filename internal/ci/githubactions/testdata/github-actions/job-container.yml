@@ -1,0 +1,8 @@
+name: Containerized job
+on: push
+jobs:
+  containerized:
+    runs-on: ubuntu-latest
+    container: node:24
+    steps:
+      - run: node --version

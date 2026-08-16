@@ -1,0 +1,15 @@
+name: Unsupported actions
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: logs/
+      - name: Conditional
+        if: always()
+        run: echo done
+      - uses: docker://alpine:3.20

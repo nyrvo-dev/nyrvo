@@ -1,0 +1,9 @@
+name: Working directory
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run in subdirectory
+        working-directory: ./src
+        run: npm test

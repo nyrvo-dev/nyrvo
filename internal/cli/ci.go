@@ -55,55 +55,82 @@ func runCIImport(ctx context.Context, args []string, stdout io.Writer) error {
 		return usageErr("ci import takes a run id or run URL, and optionally a job name")
 	}
 
-	client := newCIClient()
-	runJSON, jobsJSON, ref, err := client.FetchRun(ctx, operands[0])
+	imported, err := importRun(ctx, operands[0], operands[1:])
 	if err != nil {
 		return err
+	}
+
+	if err := snapshot.NewStore("").Save(imported.Snapshot); err != nil {
+		return err
+	}
+
+	if _, err := fmt.Fprintf(stdout, "Imported %s job %q (%s).\nSnapshot saved: %s, replacing any previous %s snapshot.\n",
+		imported.Ref, imported.Job, imported.Why, ciSnapshotName, ciSnapshotName); err != nil {
+		return err
+	}
+	if imported.LogNote != "" {
+		if _, err := fmt.Fprintf(stdout, "\nWarning: %s\n", imported.LogNote); err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(stdout, "\nDiagnose it against this machine:\n  nyrvo capture local\n  nyrvo doctor\n")
+	return err
+}
+
+// importedRun is a run turned into a snapshot, with what the user should be
+// told about how it was chosen.
+type importedRun struct {
+	Snapshot *snapshot.Snapshot
+	// Ref, Job and Why describe the selection: which run, which job, and on
+	// what grounds, so the caller can say it rather than leaving the user to
+	// wonder which of a run's jobs was diagnosed.
+	Ref, Job, Why string
+	// LogNote is set when the job log could not be read, in which case the
+	// snapshot carries the same sentence.
+	LogNote string
+}
+
+// importRun fetches a run, picks a job, and builds the snapshot.
+//
+// It is shared by `ci import`, which saves the result, and `doctor <run>`,
+// which diagnoses it without saving: both need exactly the same evidence, and
+// duplicating the fetch would let the two commands drift apart.
+func importRun(ctx context.Context, ref string, jobOperands []string) (importedRun, error) {
+	client := newCIClient()
+	runJSON, jobsJSON, runRef, err := client.FetchRun(ctx, ref)
+	if err != nil {
+		return importedRun{}, err
 	}
 	run, err := githubactions.ParseRun(runJSON, jobsJSON)
 	if err != nil {
-		return fmt.Errorf("%s: %w", ref, err)
+		return importedRun{}, fmt.Errorf("%s: %w", runRef, err)
 	}
 
-	job, why, err := selectRunJob(run, operands[1:])
+	job, why, err := selectRunJob(run, jobOperands)
 	if err != nil {
-		return err
+		return importedRun{}, err
 	}
 
 	snap, err := githubactions.RunSnapshot(run, job, ciSnapshotName, time.Now())
 	if err != nil {
-		return err
+		return importedRun{}, err
 	}
+
+	out := importedRun{Snapshot: snap, Ref: runRef, Job: job.Name, Why: why}
 
 	// The log is what turns an imported run from metadata into evidence: the
 	// versions the runner really installed and the error that stopped the job.
 	// It is also the part most likely to be unavailable — logs expire, and a
 	// token may not reach them — so a log that cannot be read degrades the
 	// import to a note instead of failing it.
-	logNote := ""
 	if rawLog, logErr := client.FetchJobLog(ctx, run.Repository, job.ID); logErr != nil {
-		logNote = "The job log could not be read, so installed runtime versions and the failing output are missing: " + logErr.Error()
-		snap.Source.Notes = append(snap.Source.Notes, logNote)
+		out.LogNote = "The job log could not be read, so installed runtime versions and the failing output are missing: " + logErr.Error()
+		snap.Source.Notes = append(snap.Source.Notes, out.LogNote)
 		snap.Normalize()
 	} else {
 		githubactions.ApplyJobLog(snap, githubactions.ParseJobLog(rawLog))
 	}
-
-	if err := snapshot.NewStore("").Save(snap); err != nil {
-		return err
-	}
-
-	if _, err := fmt.Fprintf(stdout, "Imported %s job %q (%s).\nSnapshot saved: %s, replacing any previous %s snapshot.\n",
-		ref, job.Name, why, ciSnapshotName, ciSnapshotName); err != nil {
-		return err
-	}
-	if logNote != "" {
-		if _, err := fmt.Fprintf(stdout, "\nWarning: %s\n", logNote); err != nil {
-			return err
-		}
-	}
-	_, err = fmt.Fprintf(stdout, "\nDiagnose it against this machine:\n  nyrvo capture local\n  nyrvo doctor\n")
-	return err
+	return out, nil
 }
 
 // selectRunJob picks the job to import and explains the choice.

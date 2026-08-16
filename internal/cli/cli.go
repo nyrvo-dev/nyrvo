@@ -43,7 +43,9 @@ Usage:
   nyrvo ci inspect [--json]         show the environments CI declares
   nyrvo ci capture <job>            save a CI job's declared environment as "ci"
   nyrvo ci import <run> [job]       import a run that happened, as "ci"
-  nyrvo doctor [a] [b] [--json]     diagnose two environments (default: local ci)
+  nyrvo doctor [--json]            diagnose local against ci
+  nyrvo doctor <run> [--json]      import a run and diagnose it in one step
+  nyrvo doctor <a> <b> [--json]    diagnose two captured environments
   nyrvo list                        list captured environments
   nyrvo version                     print version information
 
@@ -71,7 +73,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "ci":
 		err = runCI(ctx, args[1:], stdout)
 	case "doctor":
-		err = runDoctor(args[1:], stdout)
+		err = runDoctor(ctx, args[1:], stdout, stderr)
 	case "list":
 		err = runList(args[1:], stdout, stderr)
 	case "version":

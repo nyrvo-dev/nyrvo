@@ -83,10 +83,18 @@ live in the job logs), and the snapshot says so rather than implying it knows.
 Ask what the differences mean:
 
 ```
-$ nyrvo doctor              # diagnoses local against ci
+$ nyrvo doctor                                  # diagnoses local against ci
+$ nyrvo doctor 31921289286                      # import a run and diagnose it, in one step
+$ nyrvo doctor https://github.com/owner/repo/actions/runs/31921289286
 $ nyrvo doctor local prod
 $ nyrvo doctor --json
 ```
+
+Given a run reference, `doctor` imports the run and captures this machine in
+memory and diagnoses both — nothing is saved, so a one-shot question never
+overwrites snapshots you captured deliberately. The report opens with what the
+evidence itself reported: the run's conclusion, the step that failed, the error
+line from the job log, and anything Nyrvo could not model.
 
 `doctor` applies deterministic rules — no model, no network, no clock — and
 ranks findings by how plausibly they explain a failure rather than by how large

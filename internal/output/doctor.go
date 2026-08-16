@@ -15,9 +15,20 @@ import (
 // changes, preserving the order the caller chose. Values that are empty are
 // skipped rather than printed as blanks, so a finding never reads as if it had
 // more evidence than it carries.
-func DoctorText(w io.Writer, a, b string, findings []finding.Finding) error {
+// context, when present, is what the evidence itself reported about the
+// environments — a run's conclusion, the step that failed, what Nyrvo could not
+// model. It is printed as-is and never ranked: it is testimony, not diagnosis,
+// and a reader asking "why did this fail?" needs it even when no rule matched.
+func DoctorText(w io.Writer, a, b string, findings []finding.Finding, context ...string) error {
 	var buf strings.Builder
 	fmt.Fprintf(&buf, "NYRVO DOCTOR\n\n%s vs %s\n", a, b)
+
+	if len(context) > 0 {
+		buf.WriteString("\nWHAT THE EVIDENCE REPORTS\n\n")
+		for _, c := range context {
+			fmt.Fprintf(&buf, "  %s\n", c)
+		}
+	}
 
 	if len(findings) == 0 {
 		// A clean bill of health has to say what it means. "No findings" is not
@@ -107,8 +118,10 @@ func summaryLine(findings []finding.Finding) string {
 
 // doctorDoc is the machine-readable doctor report.
 type doctorDoc struct {
-	A        string            `json:"a"`
-	B        string            `json:"b"`
+	A string `json:"a"`
+	B string `json:"b"`
+	// Context is what the evidence reported about itself, unranked.
+	Context  []string          `json:"context,omitempty"`
 	Findings []finding.Finding `json:"findings"`
 	Summary  doctorSummary     `json:"summary"`
 }
@@ -124,11 +137,12 @@ type doctorSummary struct {
 // DoctorJSON renders findings for a machine. Reusing the JSON helper keeps this
 // output indented, newline-terminated, and encoded exactly like every other
 // --json form in the CLI.
-func DoctorJSON(w io.Writer, a, b string, findings []finding.Finding) error {
+func DoctorJSON(w io.Writer, a, b string, findings []finding.Finding, context ...string) error {
 	counts := finding.Count(findings)
 	return JSON(w, doctorDoc{
 		A:        a,
 		B:        b,
+		Context:  context,
 		Findings: findings,
 		Summary: doctorSummary{
 			High:   counts[finding.SeverityHigh],

@@ -1,6 +1,7 @@
 package output
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
@@ -235,5 +236,69 @@ func TestDoctorRenderersPropagateWriterError(t *testing.T) {
 				t.Errorf("%s returned %v, want it to wrap sentinel %v", tt.name, err, sentinel)
 			}
 		})
+	}
+}
+
+// Evidence the snapshots reported about themselves is printed above the
+// findings and never ranked: a run's failing step answers "why did this fail?"
+// in a way no environment rule can, and it must appear even when no rule
+// matched.
+func TestDoctorTextContext(t *testing.T) {
+	context := []string{
+		"The run concluded with failure.",
+		`The job failed at step "Run npm test".`,
+	}
+
+	got := render(t, func(w io.Writer) error { return DoctorText(w, "local", "ci", nil, context...) })
+	for _, want := range append([]string{"WHAT THE EVIDENCE REPORTS"}, context...) {
+		if !strings.Contains(got, want) {
+			t.Errorf("context line %q missing from a findings-free report:\n%s", want, got)
+		}
+	}
+	// A clean rule set still has to say what "no findings" means.
+	if !strings.Contains(got, "no rule matched") {
+		t.Errorf("clean report lost its wording:\n%s", got)
+	}
+
+	withFinding := []finding.Finding{{
+		Rule: "system.os_mismatch", Severity: finding.SeverityLow,
+		Component: "system", Key: "os", Expected: "darwin", Actual: "linux",
+		Description: "Different platforms.",
+	}}
+	got = render(t, func(w io.Writer) error { return DoctorText(w, "local", "ci", withFinding, context...) })
+	if idx, jdx := strings.Index(got, "WHAT THE EVIDENCE REPORTS"), strings.Index(got, "LOW"); idx < 0 || jdx < 0 || idx > jdx {
+		t.Errorf("evidence must precede the findings:\n%s", got)
+	}
+
+	// No context means no heading: an empty section would imply the evidence
+	// said nothing when it was simply never asked.
+	if got := render(t, func(w io.Writer) error { return DoctorText(w, "local", "ci", withFinding) }); strings.Contains(got, "WHAT THE EVIDENCE REPORTS") {
+		t.Errorf("empty context printed a heading:\n%s", got)
+	}
+}
+
+func TestDoctorJSONContext(t *testing.T) {
+	var buf bytes.Buffer
+	if err := DoctorJSON(&buf, "local", "ci", nil, "The run concluded with failure."); err != nil {
+		t.Fatalf("DoctorJSON: %v", err)
+	}
+	var doc struct {
+		Context []string `json:"context"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if len(doc.Context) != 1 || doc.Context[0] != "The run concluded with failure." {
+		t.Errorf("context = %v, want the single evidence line", doc.Context)
+	}
+
+	// Absent context must be omitted rather than serialized as null, so a
+	// consumer never has to distinguish the two.
+	buf.Reset()
+	if err := DoctorJSON(&buf, "local", "ci", nil); err != nil {
+		t.Fatalf("DoctorJSON: %v", err)
+	}
+	if strings.Contains(buf.String(), "context") {
+		t.Errorf("empty context should be omitted: %s", buf.String())
 	}
 }

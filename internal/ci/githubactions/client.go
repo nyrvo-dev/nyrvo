@@ -72,6 +72,16 @@ func parseRunRef(arg string) (runRef, error) {
 	return runRef{}, fmt.Errorf("%q is not a run id or a run URL (expected 123456789 or https://github.com/owner/repo/actions/runs/123456789)", arg)
 }
 
+// IsRunReference reports whether s looks like a run id or a run URL.
+//
+// Callers use it to tell "the user named a run" from "the user typed something
+// else", so a mistyped command can be answered with usage rather than with a
+// failed fetch.
+func IsRunReference(s string) bool {
+	_, err := parseRunRef(s)
+	return err == nil
+}
+
 // Client fetches workflow run data from the GitHub API.
 //
 // It shells out to the user's own `gh`, which is already authenticated, rather

@@ -6,8 +6,9 @@ application behaves differently across local, CI, staging, and production.
 ## Status
 
 Early development. The commands listed under [Usage](#usage) are what works
-today; the roadmap (automated drift diagnosis, more collectors) is not yet
-available.
+today: capture, diff, reading CI configuration, importing a run that happened,
+and deterministic diagnosis. Not yet available: Docker and database collectors,
+replaying CI locally, and the optional AI layer.
 
 ## Why
 
@@ -141,7 +142,8 @@ so they remain owner-readable.
 
 ## Development
 
-Run the full local checks with `make check` (test, race, vet, and gofmt).
+Run the full local checks with `make check` (test, race detector, vet, gofmt
+and golangci-lint).
 Go 1.25 is the minimum supported version; development runs on 1.26. CI verifies
 both.
 

@@ -11,7 +11,14 @@ not.
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `golangci-lint-action` upgraded to v7, which is the first release able to
+  install golangci-lint v2. v6 rejected the pinned version outright.
+- Two tests depended on the platform they ran on. One diagnosed a Linux fixture
+  against a live capture and passed on macOS while failing on the Linux runner;
+  the other compared a machine against itself and asserted findings it could
+  never have.
 
 ## [0.1.0] — unreleased
 

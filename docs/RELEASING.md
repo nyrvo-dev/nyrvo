@@ -76,20 +76,33 @@ did not write them.
    done
    ```
 
-3. Run the commands the README documents against a real repository. Every
+3. Run the suite on the platform CI uses, not only on your own:
+
+   ```
+   docker run --rm -v "$PWD":/src -w /src golang:1.26 go test ./...
+   docker run --rm -v "$PWD":/src -w /src golang:1.25 go test ./...
+   ```
+
+   `make check` on a laptop is not enough and has already proved it. A test that
+   diagnosed a Linux fixture against a live capture passed on macOS, where the
+   platforms disagree and findings appear, and failed on the Linux runner, where
+   they match and the findings vanish. Nothing but running it on Linux would
+   have caught that.
+
+4. Run the commands the README documents against a real repository. Every
    serious defect this project has found was found this way and none were found
    by reading a diff.
-4. Move `[Unreleased]` in `CHANGELOG.md` into a version section with today's
+5. Move `[Unreleased]` in `CHANGELOG.md` into a version section with today's
    date, and update the link definitions at the bottom.
-5. Commit the changelog: `docs: release vX.Y.Z`.
-6. Tag and push:
+6. Commit the changelog: `docs: release vX.Y.Z`.
+7. Tag and push:
 
    ```
    git tag -a vX.Y.Z -m "vX.Y.Z"
    git push origin main --follow-tags
    ```
 
-7. Confirm the module is fetchable, from a directory that is not the repository:
+8. Confirm the module is fetchable, from a directory that is not the repository:
 
    ```
    go install github.com/nyrvo-dev/nyrvo/cmd/nyrvo@vX.Y.Z

@@ -51,6 +51,9 @@ Usage:
   nyrvo doctor <a> <b> [--json]    diagnose two captured environments
                                    add --fail-on=high to exit non-zero on findings
                                    add --ai to print a request for your own agent
+  nyrvo config set <key> <value>    set a preference (ai.agent)
+  nyrvo config unset <key>          clear a preference
+  nyrvo config list                 show preferences and where they live
   nyrvo list                        list captured environments
   nyrvo version                     print version information
 
@@ -79,6 +82,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = runCI(ctx, args[1:], stdout)
 	case "doctor":
 		err = runDoctor(ctx, args[1:], stdout, stderr)
+	case "config":
+		err = runConfig(args[1:], stdout)
 	case "list":
 		err = runList(args[1:], stdout, stderr)
 	case "version":

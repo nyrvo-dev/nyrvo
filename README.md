@@ -215,8 +215,23 @@ there is nothing to read is how that is enforced without depending on any one
 vendor's flags. The trade is real: an agent cannot look at the code that failed,
 so it answers from the evidence Nyrvo vouches for or says it cannot.
 
-Adding another agent is a line in a table — see [CONTRIBUTING.md](CONTRIBUTING.md).
-Configuring an arbitrary command as an agent is deliberately not supported.
+To stop typing it every time, configure a default:
+
+```
+$ nyrvo config set ai.agent opencode
+$ nyrvo doctor --ai                  # now runs opencode
+$ nyrvo doctor --agent=claude        # an explicit flag still wins
+$ nyrvo doctor --agent=none          # print the request instead, just this once
+$ nyrvo config list                  # what is set, and where it lives
+```
+
+The file is user-level only, at `os.UserConfigDir()/nyrvo/config.json`. There is
+deliberately no project-level config, and that is a security decision rather
+than a simplification: this file selects a program Nyrvo will execute, so a copy
+of it living in a repository would let whoever opens a pull request choose that
+program. For the same reason, configuring an arbitrary command as an agent is
+not supported at all. Adding another *known* agent is a line in a table — see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 `--json` prints one document either way, replacing the diagnosis document rather
 than following it: two JSON documents on one stream is not something a consumer

@@ -47,6 +47,9 @@ earlier version anyone could be upgrading from.
   it. `--agent=claude|codex|opencode` hands it to an agent CLI the user already
   installed, run in an empty temporary directory.
 - `--json` on every command that produces a document.
+- `nyrvo config set|unset|list`: a user-level preference file at
+  `os.UserConfigDir()/nyrvo/config.json`. `ai.agent` sets the default agent, so
+  `--ai` alone runs it. There is deliberately no project-level config.
 - `nyrvo list`, `nyrvo version`.
 
 ### Security
@@ -60,6 +63,8 @@ earlier version anyone could be upgrading from.
 - A value referencing a secret in a workflow is printed as `<secret>` in a
   replay plan.
 - Nyrvo owns no API credentials for any AI vendor and never asks for one.
+- Configuration is user-level only. A repository-level config file would let the
+  author of a pull request choose which program Nyrvo executes.
 
 [Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/nyrvo-dev/nyrvo/releases/tag/v0.1.0

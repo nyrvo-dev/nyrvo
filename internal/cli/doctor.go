@@ -58,6 +58,15 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err != nil {
 		return err
 	}
+	// A configured agent runs (ADR 0016). Writing `nyrvo config set ai.agent` is
+	// the opt-in; asking the user to repeat it on every command would be asking
+	// them to keep agreeing to a decision they already made. The disclosure
+	// printed before execution is what keeps that honest.
+	if selected == nil && *agentName == "" && *withAI {
+		if selected, err = configuredAgent(); err != nil {
+			return err
+		}
+	}
 	// Naming an agent is asking for it to run, so it opts into the AI layer on
 	// its own. Requiring --ai alongside it would only be ceremony: the choice is
 	// already visible in the command the user typed.
@@ -129,6 +138,10 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	return failOnThreshold(stderr, findings, threshold)
 }
 
+// noAgent is the reserved --agent value that forces the printed request even
+// when a default agent is configured.
+const noAgent = "none"
+
 // selectAgent resolves --agent. An unknown name is a usage error naming the
 // alternatives, and an agent that is not installed is reported before any
 // evidence is gathered: the user's next step is to install it or pick another,
@@ -137,9 +150,15 @@ func selectAgent(name string) (*agent.Agent, error) {
 	if name == "" {
 		return nil, nil
 	}
+	// The escape hatch for a configured default: someone who wants the request
+	// as text, this once, should not have to unset their configuration.
+	if name == noAgent {
+		return nil, nil
+	}
 	selected, ok := agent.Lookup(name)
 	if !ok {
-		return nil, usageErr("--agent=%s is not an agent Nyrvo knows; use one of %s", name, strings.Join(agent.Names(), ", "))
+		return nil, usageErr("--agent=%s is not an agent Nyrvo knows; use one of %s, or %s to print the request instead",
+			name, strings.Join(agent.Names(), ", "), noAgent)
 	}
 	if !selected.Available() {
 		return nil, fmt.Errorf("%s is not installed; install it, choose another agent (%s), or run --ai alone to print the request and paste it yourself",

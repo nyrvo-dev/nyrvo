@@ -282,7 +282,10 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 	// Installed versions live only in the job logs, which Nyrvo does not import
 	// yet. Leaving Runtimes empty without a note would imply the run reported
 	// none, so the note makes the gap explicit.
-	notes = append(notes, "Run metadata does not report installed runtime versions; they are only in the job logs, which Nyrvo does not import yet.")
+	// The note describes what this function alone can know. ApplyJobLog removes
+	// it if the job's log turns out to name the versions, so a snapshot never
+	// carries a caveat that its own contents disprove.
+	notes = append(notes, runtimesFromLogNote)
 
 	ref := j.URL
 	if ref == "" {
@@ -297,3 +300,8 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 	snap.Normalize()
 	return snap, nil
 }
+
+// runtimesFromLogNote is the caveat a run's metadata alone must carry: the API
+// reports no installed versions. ApplyJobLog deletes it when the job's log
+// supplies them, so the note and the snapshot never contradict each other.
+const runtimesFromLogNote = "Run metadata does not report installed runtime versions; they are read from the job log when one is available."

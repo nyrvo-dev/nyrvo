@@ -1,0 +1,25 @@
+﻿2026-08-13T21:16:07.1169094Z Current runner version: '2.336.0'
+2026-08-13T21:16:07.1209965Z ##[group]Runner Image Provisioner
+2026-08-13T21:16:07.1211298Z Hosted Compute Agent
+2026-08-13T21:16:07.1212313Z Version: 20260729.566
+2026-08-13T21:16:07.1213416Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+2026-08-13T21:16:07.1215064Z Build Date: 2026-07-29T19:17:02Z
+2026-08-13T21:16:07.1216188Z Worker ID: {599d033c-2a58-4dd1-a730-02d950ae802b}
+2026-08-13T21:16:07.1217417Z Azure Region: eastus
+2026-08-13T21:16:07.1218436Z ##[endgroup]
+2026-08-13T21:16:07.1221067Z ##[group]Operating System
+2026-08-13T21:16:07.1222063Z Ubuntu
+2026-08-13T21:16:07.1222998Z 24.04.4
+2026-08-13T21:16:08.6157448Z   check-latest: false
+2026-08-13T21:16:08.6165938Z   token: ***
+2026-08-13T21:16:08.6166464Z   package-manager-cache: true
+2026-08-13T21:16:08.6167108Z ##[endgroup]
+2026-08-13T21:16:08.7679584Z Attempt to resolve LTS alias from manifest...
+2026-08-13T21:16:09.2315987Z Found in cache @ /opt/hostedtoolcache/node/24.19.0/x64
+2026-08-13T21:16:09.2319358Z ##[group]Environment details
+2026-08-13T21:16:09.6889906Z node: v24.19.0
+2026-08-13T21:16:09.6890499Z npm: 11.17.0
+2026-08-13T21:16:09.6890747Z yarn: 1.22.22
+2026-08-13T21:16:09.6891359Z ##[endgroup]
+2026-08-13T21:16:09.7070772Z ##[group]Run npm install --ignore-scripts --include=dev
+2026-08-13T21:16:09.7071315Z [36;1mnpm install --ignore-scripts --include=dev[0m

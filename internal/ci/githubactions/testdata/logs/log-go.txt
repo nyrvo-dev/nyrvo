@@ -1,0 +1,48 @@
+﻿2026-08-16T00:10:30.8971135Z Current runner version: '2.336.0'
+2026-08-16T00:10:30.8997761Z ##[group]Runner Image Provisioner
+2026-08-16T00:10:30.8998628Z Hosted Compute Agent
+2026-08-16T00:10:30.8999328Z Version: 20260729.566
+2026-08-16T00:10:30.8999963Z Commit: cf7153fe6e25b664e8693c24944bf2b00355d109
+2026-08-16T00:10:30.9000699Z Build Date: 2026-07-29T19:17:02Z
+2026-08-16T00:10:30.9001444Z Worker ID: {f2d01472-dd1f-4c13-8ec5-3ab6443ee627}
+2026-08-16T00:10:30.9002165Z Azure Region: northcentralus
+2026-08-16T00:10:30.9002809Z ##[endgroup]
+2026-08-16T00:10:30.9004327Z ##[group]Operating System
+2026-08-16T00:10:30.9004999Z Ubuntu
+2026-08-16T00:10:30.9005593Z 24.04.4
+2026-08-16T00:10:30.9006104Z LTS
+2026-08-16T00:10:30.9006586Z ##[endgroup]
+2026-08-16T00:10:30.9007514Z ##[group]Runner Image
+2026-08-16T00:10:30.9008172Z Image: ubuntu-24.04
+2026-08-16T00:10:30.9008778Z Version: 20260810.271.1
+2026-08-16T00:10:30.9010038Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260810.271/images/ubuntu/Ubuntu2404-Readme.md
+2026-08-16T00:10:30.9011632Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260810.271
+2026-08-16T00:10:30.9012610Z ##[endgroup]
+2026-08-16T00:10:30.9013922Z ##[group]GITHUB_TOKEN Permissions
+2026-08-16T00:10:30.9016048Z Actions: read
+2026-08-16T00:10:33.9072736Z ##[group]Run actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+2026-08-16T00:10:33.9073263Z with:
+2026-08-16T00:10:33.9073538Z   go-version-file: go.mod
+2026-08-16T00:10:33.9073854Z   check-latest: false
+2026-08-16T00:10:33.9077089Z   token: ***
+2026-08-16T00:10:33.9077421Z   cache: true
+2026-08-16T00:10:33.9077687Z ##[endgroup]
+2026-08-16T00:10:34.0231782Z Setup go version spec 1.26.6
+2026-08-16T00:10:34.0241474Z Attempting to download 1.26.6...
+2026-08-16T00:10:34.6252222Z matching 1.26.6...
+2026-08-16T00:10:34.6290884Z Acquiring 1.26.6 from https://github.com/actions/go-versions/releases/download/1.26.6-31764261251/go-1.26.6-linux-x64.tar.gz
+2026-08-16T00:10:35.1435095Z Extracting Go...
+2026-08-16T00:10:35.1554462Z [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /home/runner/work/_temp/241d6df4-f54a-4eae-9eda-5530bafd6ac9 -f /home/runner/work/_temp/ffd97b27-672e-45a1-994f-29a7eee83410
+2026-08-16T00:10:36.7709870Z Successfully extracted go to /home/runner/work/_temp/241d6df4-f54a-4eae-9eda-5530bafd6ac9
+2026-08-16T00:10:36.7710890Z Adding to the cache ...
+2026-08-16T00:10:42.3893512Z Successfully cached go to /opt/hostedtoolcache/go/1.26.6/x64
+2026-08-16T00:10:42.3896204Z Added go to the path
+2026-08-16T00:10:42.3898729Z Successfully set up Go version 1.26.6
+2026-08-16T00:10:42.4089690Z [command]/opt/hostedtoolcache/go/1.26.6/x64/bin/go env GOMODCACHE
+2026-08-16T00:10:42.4115779Z [command]/opt/hostedtoolcache/go/1.26.6/x64/bin/go env GOCACHE
+2026-08-16T00:10:42.4143566Z /home/runner/go/pkg/mod
+2026-08-16T00:10:42.4158711Z /home/runner/.cache/go-build
+2026-08-16T00:10:42.5398547Z Cache hit for: setup-go-Linux-x64-ubuntu24-go-1.26.6-fe4d4773f89701c137605b36181d3cdf19f3f4801b95683bac4295cb2c2c25f9
+2026-08-16T00:10:43.6638507Z Received 134217728 of 210991135 (63.6%), 127.7 MBs/sec
+2026-08-16T00:10:43.9198117Z Received 210991135 of 210991135 (100.0%), 159.3 MBs/sec
+2026-08-16T00:10:43.9199412Z Cache Size: ~201 MB (210991135 B)

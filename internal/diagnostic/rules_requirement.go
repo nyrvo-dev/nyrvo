@@ -179,10 +179,10 @@ func unsatisfiedFinding(in Input, side *snapshot.Snapshot, req snapshot.Requirem
 		f.Recommendation = fmt.Sprintf("Change the %s version input in %s to one that satisfies %s.",
 			req.Runtime, declaredRef(in), constraint)
 	case CIDerived(side):
-		f.Recommendation = fmt.Sprintf("Set up a %s version that satisfies %s in CI, or relax the constraint in %s.",
+		f.Recommendation = fmt.Sprintf("Set up a version of %s that satisfies %s in CI, or relax the constraint in %s.",
 			req.Runtime, constraint, req.Source)
 	default:
-		f.Recommendation = fmt.Sprintf("Install a %s version that satisfies %s, or relax the constraint in %s.",
+		f.Recommendation = fmt.Sprintf("Install a version of %s that satisfies %s, or relax the constraint in %s.",
 			req.Runtime, constraint, req.Source)
 	}
 	return f

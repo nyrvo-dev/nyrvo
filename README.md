@@ -7,8 +7,9 @@ application behaves differently across local, CI, staging, and production.
 
 Early development. The commands listed under [Usage](#usage) are what works
 today: capture, diff, reading CI configuration, importing a run that happened,
-and deterministic diagnosis. Not yet available: database collectors, replaying
-CI locally, and the optional AI layer.
+and deterministic diagnosis. `nyrvo ci replay` prints what a job does; it never
+runs it. Not yet available: database collectors, executing anything on your
+behalf, and the optional AI layer.
 
 ## Why
 
@@ -133,6 +134,40 @@ tilde ranges, wildcards (`"20.x"`), bare prefixes, and comma- or space-separated
 conjunctions with `||` alternatives. A constraint it cannot fully parse —
 `lts/iron`, `workspace:*`, a hyphen range — produces no finding rather than a
 guess.
+
+### Reproducing a CI job
+
+`nyrvo ci replay <job>` prints what a job does, in order, and marks every step
+it cannot reproduce here with the reason:
+
+```
+$ nyrvo ci replay test
+REPLAY test
+
+PREREQUISITES
+  this job runs once per matrix combination (go-version=[1.25 1.26], os=[ubuntu-latest macos-latest]); the steps below describe one of them
+
+STEPS
+
+1. Checkout
+   uses              actions/checkout@v4
+   not reproducible  uses actions/checkout@v4; Nyrvo does not run actions, but your working tree is already the checkout, so there is nothing to do
+
+2. Set up Go
+   uses              actions/setup-go@v5
+   not reproducible  actions/setup-go@v5 installs the go named by ${{ matrix.go-version }}, which the runner decides; install it yourself
+
+3. Build
+   run
+     go build ./...
+```
+
+It executes nothing, by design. A tool that runs a workflow's steps outside the
+runner diverges from CI in ways it cannot see — no runner image, no actions, no
+secrets, no service containers — and produces a run that proves nothing while
+looking authoritative. A plan you read and paste stays honest about the gap.
+Environment values come from the workflow file and are printed as written, but a
+value referencing a secret is replaced with `<secret>`.
 
 Other commands:
 

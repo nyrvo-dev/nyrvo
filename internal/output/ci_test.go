@@ -132,3 +132,26 @@ func TestCIInspectTextWriterError(t *testing.T) {
 		})
 	}
 }
+
+func TestCIJobsTextShowsDeclaredServices(t *testing.T) {
+	// These reached the report as "not modelled" notes before they had a
+	// section. Modelling them must not be how they stop being shown.
+	jobs := []CIJob{{
+		Workflow: "ci.yml",
+		Job:      "test",
+		Snapshot: &snapshot.Snapshot{
+			Name:   "ci",
+			System: &snapshot.System{OS: "linux", Arch: "amd64"},
+			Services: []snapshot.Service{
+				{ID: "db", Image: "postgres:16"},
+				{ID: "cache", Image: "redis:7"},
+			},
+		},
+	}}
+	got := render(t, func(w io.Writer) error { return CIInspectText(w, jobs) })
+	for _, want := range []string{"services", "db postgres:16", "cache redis:7"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("CIJobsText output missing %q:\n%s", want, got)
+		}
+	}
+}

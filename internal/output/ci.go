@@ -47,6 +47,17 @@ func CIInspectText(w io.Writer, jobs []CIJob) error {
 		} else {
 			b.WriteString("  runtimes   none declared\n")
 		}
+		// Services used to reach this report as "not modelled" notes. Modelling
+		// them moved them out of that list, and without a line of their own a
+		// job's backing containers would have quietly stopped being shown at
+		// all — the report would look complete while saying less than before.
+		if len(snap.Services) > 0 {
+			parts := make([]string, 0, len(snap.Services))
+			for _, s := range snap.Services {
+				parts = append(parts, s.ID+" "+s.Image)
+			}
+			fmt.Fprintf(&b, "  services   %s\n", strings.Join(parts, ", "))
+		}
 		if snap.Environment != nil && len(snap.Environment.Names) > 0 {
 			fmt.Fprintf(&b, "  env        %s\n", strings.Join(snap.Environment.Names, ", "))
 		}

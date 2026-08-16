@@ -45,6 +45,7 @@ Usage:
   nyrvo ci inspect [--json]         show the environments CI declares
   nyrvo ci capture <job>            save a CI job's declared environment as "ci"
   nyrvo ci import <run> [job]       import a run that happened, as "ci"
+  nyrvo ci replay <job> [--json]    print what a job does, without running it
   nyrvo doctor [--json]            diagnose local against ci
   nyrvo doctor <run> [--json]      import a run and diagnose it in one step
   nyrvo doctor <a> <b> [--json]    diagnose two captured environments

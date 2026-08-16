@@ -26,7 +26,7 @@ var newCIClient = func() *githubactions.Client { return &githubactions.Client{} 
 
 func runCI(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) == 0 {
-		return usageErr("ci needs a subcommand: inspect, capture or import")
+		return usageErr("ci needs a subcommand: inspect, capture, import or replay")
 	}
 	switch args[0] {
 	case "inspect":
@@ -35,6 +35,8 @@ func runCI(ctx context.Context, args []string, stdout io.Writer) error {
 		return runCICapture(args[1:], stdout)
 	case "import":
 		return runCIImport(ctx, args[1:], stdout)
+	case "replay":
+		return runCIReplay(args[1:], stdout)
 	default:
 		return usageErr("unknown ci subcommand %q", args[0])
 	}
@@ -172,15 +174,25 @@ func runJobNames(jobs []githubactions.RunJob) []string {
 	return names
 }
 
+// ciJob is one workflow job as both of the things the CLI needs it to be: the
+// environment it declares, which is what `ci inspect` and `ci capture` render,
+// and the job itself, which is what `ci replay` reads. Keeping the parsed job
+// out of output.CIJob keeps it out of the --json document, where it would be a
+// second, redundant description of the same workflow file.
+type ciJob struct {
+	output.CIJob
+	Parsed *githubactions.Job
+}
+
 // ciJobs reads every workflow and converts every job into the environment it
 // declares. Conversion happens up front because a job is only interesting here
 // together with what Nyrvo could and could not derive from it.
-func ciJobs(now time.Time) ([]output.CIJob, error) {
+func ciJobs(now time.Time) ([]ciJob, error) {
 	workflows, err := githubactions.ParseDir(output.GitHubWorkflowsDir)
 	if err != nil {
 		return nil, err
 	}
-	var jobs []output.CIJob
+	var jobs []ciJob
 	for _, w := range workflows {
 		for i := range w.Jobs {
 			job := &w.Jobs[i]
@@ -188,14 +200,64 @@ func ciJobs(now time.Time) ([]output.CIJob, error) {
 			if err != nil {
 				return nil, err
 			}
-			jobs = append(jobs, output.CIJob{
-				Workflow: filepath.Base(w.Path),
-				Job:      job.ID,
-				Snapshot: snap,
+			jobs = append(jobs, ciJob{
+				CIJob: output.CIJob{
+					Workflow: filepath.Base(w.Path),
+					Job:      job.ID,
+					Snapshot: snap,
+				},
+				Parsed: job,
 			})
 		}
 	}
 	return jobs, nil
+}
+
+// ciJobDocs drops the parsed jobs, leaving what the renderers and the --json
+// form are defined in terms of.
+func ciJobDocs(jobs []ciJob) []output.CIJob {
+	docs := make([]output.CIJob, 0, len(jobs))
+	for _, j := range jobs {
+		docs = append(docs, j.CIJob)
+	}
+	return docs
+}
+
+// runCIReplay prints what a job does, in order, and says which parts cannot be
+// reproduced here. It never runs anything.
+//
+// Printing a plan rather than executing one is the whole point: a tool that
+// executes a workflow's steps outside the runner diverges from CI in ways it
+// cannot see — no runner image, no actions, no secrets, no service containers —
+// and the result would be a run that proves nothing while looking authoritative.
+// A plan a person reads and pastes stays honest about that gap, and marks every
+// step it cannot reproduce with the reason.
+func runCIReplay(args []string, stdout io.Writer) error {
+	fs := flag.NewFlagSet("ci replay", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	asJSON := fs.Bool("json", false, "write the plan as JSON")
+	flags, operands := splitFlags(args)
+	if err := fs.Parse(flags); err != nil {
+		return usageErr("ci replay: %v", err)
+	}
+	if len(operands) != 1 {
+		return usageErr("ci replay takes exactly one job selector")
+	}
+
+	jobs, err := ciJobs(time.Now())
+	if err != nil {
+		return err
+	}
+	job, err := selectCIJob(jobs, operands[0])
+	if err != nil {
+		return err
+	}
+
+	plan := githubactions.Replay(job.Parsed)
+	if *asJSON {
+		return output.ReplayJSON(stdout, plan)
+	}
+	return output.ReplayText(stdout, plan)
 }
 
 func runCIInspect(args []string, stdout io.Writer) error {
@@ -215,9 +277,9 @@ func runCIInspect(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *asJSON {
-		return output.JSON(stdout, jobs)
+		return output.JSON(stdout, ciJobDocs(jobs))
 	}
-	return output.CIInspectText(stdout, jobs)
+	return output.CIInspectText(stdout, ciJobDocs(jobs))
 }
 
 func runCICapture(args []string, stdout io.Writer) error {
@@ -252,13 +314,13 @@ func runCICapture(args []string, stdout io.Writer) error {
 // must not silently pick one: an ambiguous selector is rejected with the exact
 // alternatives, because capturing the wrong job would produce a diff that looks
 // authoritative and is about the wrong CI run.
-func selectCIJob(jobs []output.CIJob, selector string) (output.CIJob, error) {
+func selectCIJob(jobs []ciJob, selector string) (ciJob, error) {
 	workflow, id, qualified := strings.Cut(selector, ":")
 	if !qualified {
 		id = selector
 	}
 
-	var matches []output.CIJob
+	var matches []ciJob
 	for _, j := range jobs {
 		if j.Job != id {
 			continue
@@ -274,15 +336,15 @@ func selectCIJob(jobs []output.CIJob, selector string) (output.CIJob, error) {
 		return matches[0], nil
 	case 0:
 		if len(jobs) == 0 {
-			return output.CIJob{}, fmt.Errorf("no workflow jobs found in %s", output.GitHubWorkflowsDir)
+			return ciJob{}, fmt.Errorf("no workflow jobs found in %s", output.GitHubWorkflowsDir)
 		}
-		return output.CIJob{}, fmt.Errorf("no CI job matches %q; available: %s", selector, strings.Join(jobSelectors(jobs), ", "))
+		return ciJob{}, fmt.Errorf("no CI job matches %q; available: %s", selector, strings.Join(jobSelectors(jobs), ", "))
 	default:
-		return output.CIJob{}, usageErr("job %q is declared in more than one workflow; use one of: %s", id, strings.Join(jobSelectors(matches), ", "))
+		return ciJob{}, usageErr("job %q is declared in more than one workflow; use one of: %s", id, strings.Join(jobSelectors(matches), ", "))
 	}
 }
 
-func jobSelectors(jobs []output.CIJob) []string {
+func jobSelectors(jobs []ciJob) []string {
 	out := make([]string, 0, len(jobs))
 	for _, j := range jobs {
 		out = append(out, j.Workflow+":"+j.Job)

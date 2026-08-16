@@ -42,6 +42,7 @@ Usage:
   nyrvo diff <a> <b> [--json]       compare two captured environments
   nyrvo ci inspect [--json]         show the environments CI declares
   nyrvo ci capture <job>            save a CI job's declared environment as "ci"
+  nyrvo ci import <run> [job]       import a run that happened, as "ci"
   nyrvo doctor [a] [b] [--json]     diagnose two environments (default: local ci)
   nyrvo list                        list captured environments
   nyrvo version                     print version information
@@ -68,7 +69,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "diff":
 		err = runDiff(args[1:], stdout, stderr)
 	case "ci":
-		err = runCI(args[1:], stdout)
+		err = runCI(ctx, args[1:], stdout)
 	case "doctor":
 		err = runDoctor(args[1:], stdout)
 	case "list":

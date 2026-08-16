@@ -56,11 +56,29 @@ $ nyrvo capture local
 $ nyrvo diff local ci
 ```
 
-Nyrvo reads `.github/workflows/*.yml`; it never runs a workflow, resolves an
-action, or calls the GitHub API. Anything it recognizes but does not model is
-listed under "not modelled" instead of being silently dropped, and a value it
-cannot know — `node-version: 20.x`, `runs-on: ${{ matrix.os }}` — is reported
-as unknown rather than guessed.
+`ci inspect` and `ci capture` read `.github/workflows/*.yml` and never run a
+workflow, resolve an action, or call the GitHub API. Anything Nyrvo recognizes
+but does not model is listed under "not modelled" instead of being silently
+dropped, and a value it cannot know — `node-version: 20.x`, `runs-on: ${{
+matrix.os }}` — is reported as unknown rather than guessed.
+
+Or import a run that actually happened:
+
+```
+$ nyrvo ci import 31921289286
+$ nyrvo ci import https://github.com/owner/repo/actions/runs/31921289286
+$ nyrvo ci import <run> "test (ubuntu-latest)"     # pick a specific job
+```
+
+A run reports what a job *got* rather than what it asked for: the commit that
+was checked out and the runner it landed on, so a `${{ matrix.os }}` that the
+workflow file could only leave unknown becomes a real platform. It defaults to
+the job that failed — the one you are asking about — and refuses to guess when
+more than one did.
+
+Importing uses your own `gh` CLI. Nyrvo never reads, stores, or asks for a
+GitHub token. Run metadata does not include installed runtime versions (those
+live in the job logs), and the snapshot says so rather than implying it knows.
 
 Ask what the differences mean:
 

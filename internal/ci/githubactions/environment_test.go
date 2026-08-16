@@ -37,6 +37,12 @@ func TestSnapshotRunnerLabels(t *testing.T) {
 	}{
 		{"ubuntu-latest", "linux", "amd64"},
 		{"ubuntu-22.04", "linux", "amd64"},
+		// The arm runners are why labels are matched exactly: an "ubuntu-"
+		// prefix rule would confidently report the wrong architecture here.
+		{"ubuntu-24.04-arm", "linux", "arm64"},
+		{"ubuntu-22.04-arm", "linux", "arm64"},
+		{"windows-11-arm", "windows", "arm64"},
+		{"UBUNTU-LATEST", "linux", "amd64"},
 		{"windows-latest", "windows", "amd64"},
 		{"macos-13", "darwin", "amd64"},
 		{"macos-14", "darwin", "arm64"},

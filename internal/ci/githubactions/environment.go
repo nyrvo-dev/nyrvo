@@ -54,21 +54,39 @@ func Snapshot(w *Workflow, j *Job, name string, now time.Time) (*snapshot.Snapsh
 	return snap, nil
 }
 
-// runnerToSystem maps a known GitHub-hosted runner label to the GOOS/GOARCH the
-// job runs on. The table is deliberately small and explicit: an unknown label
-// must not be guessed, because guessing would fabricate evidence about a machine
-// that was never observed. Only the first runs-on label is considered, since
-// GitHub uses it to choose the runner pool.
+// hostedRunners maps the GitHub-hosted runner labels to the platform they
+// provide.
+//
+// The list is exhaustive and exact rather than prefix-matched. A prefix rule
+// reads as harmless and is not: "ubuntu-24.04-arm" is arm64, so a rule that
+// answers amd64 for anything starting with "ubuntu-" states the wrong
+// architecture with full confidence, and any self-hosted label a team invents
+// ("ubuntu-slim") would be reported as a GitHub runner Nyrvo never identified.
+// An unrecognized label must produce no claim at all — see docs/adr/0009.
+var hostedRunners = map[string]snapshot.System{
+	"ubuntu-latest":    {OS: "linux", Arch: "amd64"},
+	"ubuntu-24.04":     {OS: "linux", Arch: "amd64"},
+	"ubuntu-22.04":     {OS: "linux", Arch: "amd64"},
+	"ubuntu-24.04-arm": {OS: "linux", Arch: "arm64"},
+	"ubuntu-22.04-arm": {OS: "linux", Arch: "arm64"},
+	"windows-latest":   {OS: "windows", Arch: "amd64"},
+	"windows-2025":     {OS: "windows", Arch: "amd64"},
+	"windows-2022":     {OS: "windows", Arch: "amd64"},
+	"windows-11-arm":   {OS: "windows", Arch: "arm64"},
+	"macos-latest":     {OS: "darwin", Arch: "arm64"},
+	"macos-15":         {OS: "darwin", Arch: "arm64"},
+	"macos-14":         {OS: "darwin", Arch: "arm64"},
+	"macos-13":         {OS: "darwin", Arch: "amd64"},
+}
+
+// runnerToSystem maps a runner label to the platform the job runs on, or nil
+// when the label is not a GitHub-hosted runner Nyrvo knows. Only the first
+// runs-on label is considered, since GitHub uses it to choose the runner pool.
+//
+// Labels are matched case-insensitively because GitHub treats them that way.
 func runnerToSystem(label string) *snapshot.System {
-	switch {
-	case strings.HasPrefix(label, "ubuntu-"):
-		return &snapshot.System{OS: "linux", Arch: "amd64"}
-	case strings.HasPrefix(label, "windows-"):
-		return &snapshot.System{OS: "windows", Arch: "amd64"}
-	case label == "macos-13":
-		return &snapshot.System{OS: "darwin", Arch: "amd64"}
-	case label == "macos-14", label == "macos-15", label == "macos-latest":
-		return &snapshot.System{OS: "darwin", Arch: "arm64"}
+	if sys, ok := hostedRunners[strings.ToLower(strings.TrimSpace(label))]; ok {
+		return &sys
 	}
 	return nil
 }

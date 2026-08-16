@@ -62,6 +62,7 @@ func DiffText(w io.Writer, res *diff.Result) error {
 		var b strings.Builder
 		fmt.Fprintf(&b, "No differences between %s and %s.\n", res.A, res.B)
 		writePartialEnvironmentNote(&b, res)
+		writePartialRuntimesNote(&b, res)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -93,6 +94,7 @@ func DiffText(w io.Writer, res *diff.Result) error {
 		fmt.Fprintf(&b, "    %s\t%s\n", res.B, valueOr(d.B))
 	}
 	writePartialEnvironmentNote(&b, res)
+	writePartialRuntimesNote(&b, res)
 	return writeAligned(w, b.String())
 }
 
@@ -105,6 +107,17 @@ func writePartialEnvironmentNote(b *strings.Builder, res *diff.Result) {
 	}
 	b.WriteString("\nOne side lists only the environment variables it declares, so variables\n")
 	b.WriteString("absent from it were not compared. Only variables it does declare are shown.\n")
+}
+
+// writePartialRuntimesNote does for runtimes what the environment note does for
+// variables. A silently narrowed comparison is worse than a noisy one: a reader
+// who is not told will read the absence of a runtime line as agreement.
+func writePartialRuntimesNote(b *strings.Builder, res *diff.Result) {
+	if !res.PartialRuntimes {
+		return
+	}
+	b.WriteString("\nOne side lists only the runtimes it sets up, so runtimes absent from it\n")
+	b.WriteString("were not compared; a runner image provides more than a workflow mentions.\n")
 }
 
 // SnapshotList renders stored snapshot names.

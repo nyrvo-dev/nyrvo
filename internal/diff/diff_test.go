@@ -298,3 +298,65 @@ func TestDifferenceOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestPartialRuntimesSuppressesAbsences(t *testing.T) {
+	local := base("local")
+	local.Runtimes = []snapshot.Runtime{
+		{Name: "go", Version: "1.26.6"},
+		{Name: "node", Version: "23.6.0"},
+		{Name: "python", Version: "3.13.3"},
+	}
+
+	// What a workflow declares: setup-go and nothing else. The runner image
+	// still ships node and python, so their absence here is silence, not a fact.
+	ci := base("ci")
+	ci.System = nil
+	ci.Git = nil
+	ci.Environment = nil
+	ci.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.25"}}
+	ci.PartialRuntimes = true
+
+	got := Compare(local, ci)
+	if !got.PartialRuntimes {
+		t.Error("PartialRuntimes = false, want true so the reader knows the comparison was narrowed")
+	}
+
+	var runtimeDiffs []Difference
+	for _, d := range got.Differences {
+		if d.Component == ComponentRuntime {
+			runtimeDiffs = append(runtimeDiffs, d)
+		}
+	}
+	want := []Difference{{Component: ComponentRuntime, Key: "go", Kind: KindChanged, A: "1.26.6", B: "1.25"}}
+	if len(runtimeDiffs) != len(want) || runtimeDiffs[0] != want[0] {
+		t.Fatalf("runtime differences = %+v, want only the runtime both sides describe, got %+v", want, runtimeDiffs)
+	}
+}
+
+func TestPartialRuntimesStillTestifiesToWhatItDeclares(t *testing.T) {
+	// Suppression runs one way only. A runtime the workflow sets up and the
+	// laptop does not have is real drift and must survive.
+	local := base("local")
+	local.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.6"}}
+
+	ci := base("ci")
+	ci.System = nil
+	ci.Git = nil
+	ci.Environment = nil
+	ci.Runtimes = []snapshot.Runtime{
+		{Name: "go", Version: "1.26.6"},
+		{Name: "node", Version: "22.0.0"},
+	}
+	ci.PartialRuntimes = true
+
+	var runtimeDiffs []Difference
+	for _, d := range Compare(local, ci).Differences {
+		if d.Component == ComponentRuntime {
+			runtimeDiffs = append(runtimeDiffs, d)
+		}
+	}
+	want := Difference{Component: ComponentRuntime, Key: "node", Kind: KindOnlyInB, B: "22.0.0"}
+	if len(runtimeDiffs) != 1 || runtimeDiffs[0] != want {
+		t.Fatalf("runtime differences = %+v, want %+v", runtimeDiffs, want)
+	}
+}

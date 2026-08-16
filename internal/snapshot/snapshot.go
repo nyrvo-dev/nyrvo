@@ -47,7 +47,17 @@ type Snapshot struct {
 	Requirements []Requirement `json:"requirements,omitempty"`
 	Git          *Git          `json:"git,omitempty"`
 	Runtimes     []Runtime     `json:"runtimes,omitempty"`
-	Environment  *Environment  `json:"environment,omitempty"`
+	// PartialRuntimes marks a runtime list that is known to be incomplete, for
+	// the same reason Environment.Partial exists.
+	//
+	// A machine can be asked which runtimes it has. A workflow file only states
+	// the ones a job sets up explicitly, and says nothing about the many a
+	// runner image already provides — ubuntu-latest ships node, python, ruby and
+	// php whether or not the workflow mentions them. Treating that silence as
+	// absence reports "python is missing in CI" for a Go project that was never
+	// going to use it, and buries the one difference that mattered.
+	PartialRuntimes bool         `json:"partial_runtimes,omitempty"`
+	Environment     *Environment `json:"environment,omitempty"`
 }
 
 // Source kinds. They are stable identifiers: output and future diagnostic

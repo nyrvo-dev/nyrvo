@@ -66,6 +66,11 @@ type Result struct {
 	A             string       `json:"a"`
 	B             string       `json:"b"`
 	Differences   []Difference `json:"differences"`
+	// PartialRuntimes reports that one side's runtime list was known to be
+	// incomplete, so runtimes absent from it were not compared. It is separate
+	// from PartialEnvironment because the two narrow different parts of the
+	// comparison and a reader has to know which.
+	PartialRuntimes bool `json:"partial_runtimes,omitempty"`
 	// PartialEnvironment reports that one side's environment list was known to
 	// be incomplete, so variables absent from it were not compared. Consumers
 	// must surface this: the comparison is narrower than it looks.
@@ -99,7 +104,16 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 
 	compareSection(res, ComponentSystem, systemValues(a), systemValues(b), report{a: true, b: true})
 	compareSection(res, ComponentGit, gitValues(a), gitValues(b), report{a: true, b: true})
-	compareSection(res, ComponentRuntime, runtimeValues(a), runtimeValues(b), report{a: true, b: true})
+	// A runtime list derived from a workflow states what a job sets up, not what
+	// the runner image provides, so it cannot testify to absence any more than a
+	// partial environment list can. Without this, a Go project whose workflow
+	// declares only setup-go reports node and python as missing from CI because
+	// the laptop has them — a medium finding each, for runtimes the project
+	// never uses.
+	compareSection(res, ComponentRuntime, runtimeValues(a), runtimeValues(b), report{
+		a: !partialRuntimes(b),
+		b: !partialRuntimes(a),
+	})
 	compareSection(res, ComponentDocker, dockerValues(a), dockerValues(b), report{a: true, b: true})
 	// An environment list that is only partial (a CI workflow states the
 	// variables it sets, not the ones the runner adds) cannot testify to
@@ -113,6 +127,9 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 	})
 	if partialEnvironment(a) || partialEnvironment(b) {
 		res.PartialEnvironment = true
+	}
+	if partialRuntimes(a) || partialRuntimes(b) {
+		res.PartialRuntimes = true
 	}
 
 	sort.SliceStable(res.Differences, func(i, j int) bool {
@@ -132,6 +149,12 @@ type report struct {
 	// a reports observations found only in the first snapshot, b only in the
 	// second.
 	a, b bool
+}
+
+// partialRuntimes reports a runtime list that cannot testify to absence. It
+// takes the pointer so a nil side answers false without every caller guarding it.
+func partialRuntimes(s *snapshot.Snapshot) bool {
+	return s != nil && s.PartialRuntimes
 }
 
 func partialEnvironment(s *snapshot.Snapshot) bool {

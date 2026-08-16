@@ -278,6 +278,10 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 	// [] like every other snapshot: a consumer should not have to treat null
 	// and [] as the same thing.
 	snap.Environment = &snapshot.Environment{Names: []string{}, Partial: true}
+	// Run metadata carries no runtime versions either — they live in the job
+	// logs. The list is empty and must be marked partial for the same reason:
+	// an empty complete list would read as a runner with no runtimes at all.
+	snap.PartialRuntimes = true
 
 	// Installed versions live only in the job logs, which Nyrvo does not import
 	// yet. Leaving Runtimes empty without a note would imply the run reported

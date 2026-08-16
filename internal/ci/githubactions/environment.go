@@ -262,6 +262,10 @@ func applyEnvironment(snap *snapshot.Snapshot, j *Job) {
 	// one noise line per shell variable — while marking it partial tells the
 	// diff that this list cannot testify to absence.
 	snap.Environment = &snapshot.Environment{Names: names, Partial: true}
+	// The runtime list needs the same treatment for the same reason. A workflow
+	// declares the runtimes it sets up; the runner image already carries several
+	// it never mentions, so this list cannot testify to absence either.
+	snap.PartialRuntimes = true
 }
 
 // applyServices records every service a job declares. Services are not modelled

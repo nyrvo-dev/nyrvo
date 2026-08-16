@@ -451,3 +451,20 @@ func TestSnapshotNilInputs(t *testing.T) {
 		t.Error("expected an error for a nil job")
 	}
 }
+
+func TestDeclaredRuntimesAreMarkedPartial(t *testing.T) {
+	job := &Job{ID: "test", RunsOn: []string{"ubuntu-latest"}, Steps: []Step{
+		{Uses: "actions/setup-go@v5", With: map[string]string{"go-version": "1.25"}},
+	}}
+	snap, err := Snapshot(&Workflow{Path: ".github/workflows/ci.yml"}, job, "ci", time.Time{})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	// A workflow declares what a job sets up. The runner image already carries
+	// node, python, ruby and php whether or not the file mentions them, so this
+	// list cannot testify to absence.
+	if !snap.PartialRuntimes {
+		t.Error("a workflow-derived runtime list was not marked partial")
+	}
+}

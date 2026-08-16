@@ -153,3 +153,15 @@ func TestRunDefaultsClock(t *testing.T) {
 		t.Error("CreatedAt is zero, want the current time")
 	}
 }
+
+func TestRunRecordsThatTheSnapshotWasObservedLocally(t *testing.T) {
+	res, err := Run(context.Background(), nil, Options{Name: "local"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// Without this, a local capture is the only snapshot Nyrvo produces that
+	// cannot say where it came from, while every CI snapshot can.
+	if res.Snapshot.Source == nil || res.Snapshot.Source.Kind != snapshot.SourceLocal {
+		t.Fatalf("source = %+v, want kind %q", res.Snapshot.Source, snapshot.SourceLocal)
+	}
+}

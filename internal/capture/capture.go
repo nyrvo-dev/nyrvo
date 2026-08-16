@@ -83,6 +83,11 @@ func Run(ctx context.Context, collectors []collector.Collector, opts Options) (*
 	}
 
 	snap := snapshot.New(opts.Name, now())
+	// A capture is the one snapshot produced by watching a machine rather than
+	// by reading a file about one, and it has to say so. Leaving the source
+	// unset left the strongest evidence Nyrvo has as the only kind that could
+	// not state where it came from, next to CI snapshots that do.
+	snap.Source = &snapshot.Source{Kind: snapshot.SourceLocal}
 	result := &Result{Snapshot: snap, Sections: make([]SectionResult, 0, len(collectors))}
 
 	for _, c := range collectors {

@@ -256,7 +256,8 @@ $ nyrvo version
 
 - OS, CPU architecture, and kernel
 - Git commit SHA, branch, and whether the working tree is dirty
-- Go, Node.js, and Python versions (including install paths)
+- Go, Node.js, Python, Ruby, PHP, Rust and Java versions (including install
+  paths)
 - Docker client, server, and compose versions, and whether the daemon answers
 - The version constraints the checked-out project declares
 - Environment variable **names**
@@ -270,8 +271,10 @@ suite passes in CI and fails on a laptop. Docker versions are compared by
 `nyrvo diff` like everything else.
 
 The declared constraints come from `engines.node` and `engines.npm` in
-package.json, the `go` directive in go.mod, `.nvmrc`, `.python-version`, and
-`.tool-versions`, stored verbatim. They are never compared between environments:
+package.json, the `go` directive in go.mod, `.nvmrc`, `.python-version`,
+`.tool-versions`, `.ruby-version`, the `ruby` directive in a Gemfile,
+`require.php` in composer.json, `rust-toolchain.toml`, `rust-version` in
+Cargo.toml, and `.java-version`, stored verbatim. They are never compared between environments:
 both sides normally read the same repository, so diffing them would manufacture
 drift out of provenance. They exist so a rule can call a version wrong, which is
 what `runtime.requirement_unsatisfied` does.

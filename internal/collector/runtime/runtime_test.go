@@ -128,3 +128,32 @@ func TestCollectPreservesExistingRuntimes(t *testing.T) {
 		t.Fatalf("Runtimes[1].Name = %q, want %q", snap.Runtimes[1].Name, "go")
 	}
 }
+
+func TestJavaAsksForTheVersionOnStdout(t *testing.T) {
+	c, ok := Java().(*runtimeCollector)
+	if !ok {
+		t.Fatal("Java() no longer returns the shared collector")
+	}
+	// `java -version` writes to stderr, which collector.Run does not read: the
+	// probe would return empty and be reported as an unparseable version rather
+	// than as a missing runtime. Only --version answers on stdout.
+	for _, p := range c.probes {
+		for _, arg := range p.args {
+			if arg == "-version" {
+				t.Fatalf("java probed with %q, which writes to stderr", arg)
+			}
+		}
+	}
+}
+
+func TestEveryRuntimeHasADistinctName(t *testing.T) {
+	// The name is the diff key and the string a requirement matches on. Two
+	// collectors sharing one would silently overwrite each other's observation.
+	seen := map[string]bool{}
+	for _, c := range []collector.Collector{Go(), Node(), Python(), Ruby(), PHP(), Rust(), Java()} {
+		if seen[c.Name()] {
+			t.Fatalf("two runtime collectors are both named %q", c.Name())
+		}
+		seen[c.Name()] = true
+	}
+}

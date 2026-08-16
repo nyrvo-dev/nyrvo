@@ -1,11 +1,17 @@
-// Package runtime collects the installed language runtimes (Go, Node, Python)
-// into a snapshot's Runtimes section.
+// Package runtime collects the installed language runtimes into a snapshot's
+// Runtimes section.
 //
-// The three runtimes differ only in which binary to probe and how to spell the
-// version flag, so a single collector parameterized by a probe description
-// replaces what would otherwise be three near-identical copies. Keeping one
+// Runtimes differ only in which binary to probe and how to spell the version
+// flag, so a single collector parameterized by a probe description replaces
+// what would otherwise be one near-identical copy per language. Keeping one
 // implementation means a fix to version parsing or fallback logic lands in all
-// runtimes at once.
+// of them at once, and supporting another language is a constructor.
+//
+// Every runtime is probed on every capture, whatever the project is written in.
+// A snapshot describes a machine, not a repository: narrowing the probes to the
+// languages a project declares would make two snapshots of the same machine
+// differ by which directory they were taken in, and there would be nothing left
+// to compare across projects.
 package runtime
 
 import (
@@ -127,6 +133,34 @@ func Go() collector.Collector {
 // Node returns a collector for the Node.js runtime.
 func Node() collector.Collector {
 	return newCollector("node", probe{binary: "node", args: []string{"--version"}})
+}
+
+// Ruby returns a collector for the Ruby runtime.
+func Ruby() collector.Collector {
+	return newCollector("ruby", probe{binary: "ruby", args: []string{"--version"}})
+}
+
+// PHP returns a collector for the PHP runtime.
+func PHP() collector.Collector {
+	return newCollector("php", probe{binary: "php", args: []string{"--version"}})
+}
+
+// Rust returns a collector for the Rust toolchain. It probes the compiler
+// rather than cargo: cargo reports its own version, which tracks rustc but is
+// not the version a project's rust-version constraint talks about.
+func Rust() collector.Collector {
+	return newCollector("rust", probe{binary: "rustc", args: []string{"--version"}})
+}
+
+// Java returns a collector for the Java runtime.
+//
+// It uses --version rather than the older -version because -version writes to
+// stderr, which collector.Run does not read: the probe would come back empty
+// and be reported as an unparseable version rather than as a missing runtime.
+// The consequence is that a JDK older than 9, which has no --version, is seen
+// as absent. That is the honest failure of the two.
+func Java() collector.Collector {
+	return newCollector("java", probe{binary: "java", args: []string{"--version"}})
 }
 
 // Python returns a collector for the Python runtime. It probes "python3" first

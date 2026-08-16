@@ -7,8 +7,8 @@ application behaves differently across local, CI, staging, and production.
 
 Early development. The commands listed under [Usage](#usage) are what works
 today: capture, diff, reading CI configuration, importing a run that happened,
-and deterministic diagnosis. Not yet available: Docker and database collectors,
-replaying CI locally, and the optional AI layer.
+and deterministic diagnosis. Not yet available: database collectors, replaying
+CI locally, and the optional AI layer.
 
 ## Why
 
@@ -104,6 +104,36 @@ the difference is. A version a workflow declares as a prefix (`go-version:
 quiet. When nothing matches, Nyrvo says no rule matched; it does not claim the
 environments are equivalent.
 
+`doctor` exits `0` even when it reports findings: a diagnosis is an answer, not
+a failure, and a CI job opts in when it wants the exit code to depend on them.
+`--fail-on=high` (or `medium`, `low`) exits `1` when a finding at that severity
+or worse exists:
+
+```
+$ nyrvo doctor local ci --fail-on=high     # exit 0 unless a high finding exists
+```
+
+It must be written with an equals sign. Every other nyrvo flag is boolean and
+may appear anywhere on the line (`nyrvo diff local ci --json`), so the separate
+form `--fail-on high` cannot be told apart from a snapshot named `high` and is
+rejected with a usage error. A job that wants an unsound environment to fail the
+build runs it against the defaults:
+
+```
+$ nyrvo capture local
+$ nyrvo doctor --fail-on=high
+```
+
+One rule never compares two environments at all.
+`runtime.requirement_unsatisfied` (always high) judges an environment against
+what the checked-out project declares it needs, and reports when it does not
+meet it — the only rule that can call an environment wrong rather than merely
+different. It understands comparators (`>=`, `>`, `<=`, `<`, `=`), caret and
+tilde ranges, wildcards (`"20.x"`), bare prefixes, and comma- or space-separated
+conjunctions with `||` alternatives. A constraint it cannot fully parse —
+`lts/iron`, `workspace:*`, a hyphen range — produces no finding rather than a
+guess.
+
 Other commands:
 
 ```
@@ -116,9 +146,24 @@ $ nyrvo version
 - OS, CPU architecture, and kernel
 - Git commit SHA, branch, and whether the working tree is dirty
 - Go, Node.js, and Python versions (including install paths)
+- Docker client, server, and compose versions, and whether the daemon answers
+- The version constraints the checked-out project declares
 - Environment variable **names**
 - From CI: the runner platform, setup-action runtime versions, declared
   environment variable names, and service containers a job asks for
+
+An absent Docker section means Docker is not installed; a present section with
+`daemon_running` false means the CLI is there but the daemon is not answering.
+Those are different facts, and the second is a common reason a compose-backed
+suite passes in CI and fails on a laptop. Docker versions are compared by
+`nyrvo diff` like everything else.
+
+The declared constraints come from `engines.node` and `engines.npm` in
+package.json, the `go` directive in go.mod, `.nvmrc`, `.python-version`, and
+`.tool-versions`, stored verbatim. They are never compared between environments:
+both sides normally read the same repository, so diffing them would manufacture
+drift out of provenance. They exist so a rule can call a version wrong, which is
+what `runtime.requirement_unsatisfied` does.
 
 ## Snapshots
 

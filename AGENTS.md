@@ -36,11 +36,11 @@ Collector -> Snapshot -> Diff -> (later) Finding -> Doctor
 | --- | --- |
 | `internal/snapshot` | the core contract: snapshot shape, canonical JSON, on-disk store |
 | `internal/collector` | `Collector` interface, `ErrUnavailable`, the external-command helper |
-| `internal/collector/*` | one collector per observed area (system, git, runtime, env) |
+| `internal/collector/*` | one collector per observed area (system, git, runtime, docker, requirements, env) |
 | `internal/capture` | runs collectors, tolerates unavailable ones, assembles the snapshot |
 | `internal/ci/githubactions` | parses workflow files and derives the environment a job declares |
 | `internal/finding` | what a diagnosis is: rule ids, severities, findings |
-| `internal/diagnostic` | deterministic rules that turn differences into findings |
+| `internal/diagnostic` | deterministic rules that turn differences — or a project's own declared requirements — into findings |
 | `internal/diff` | semantic comparison of two snapshots |
 | `internal/output` | terminal and JSON rendering |
 | `internal/cli` | commands, flags, exit codes |
@@ -117,6 +117,11 @@ optional, and update the diff and its tests in the same change.
 5. Never fire on a correct configuration. A declared version is a prefix:
    `go-version: "1.26"` is satisfied by `1.26.6`.
 6. Test the firing case, the non-firing case, and the nil/empty case.
+
+The requirement family (`rules_requirement.go`) is the exception to "compare
+two snapshots": it judges one environment against what the project declared
+(`RequirementRules`, always `high`), and a constraint it cannot fully parse must
+stay silent rather than guess.
 
 ## Security review triggers
 

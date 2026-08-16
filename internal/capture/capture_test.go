@@ -1,0 +1,155 @@
+package capture
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/collector"
+	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
+)
+
+// stub is a collector whose behaviour the test dictates, so capture can be
+// exercised without any real tool being installed.
+type stub struct {
+	name    string
+	err     error
+	collect func(*snapshot.Snapshot)
+	calls   *int
+}
+
+func (s stub) Name() string { return s.name }
+
+func (s stub) Collect(_ context.Context, snap *snapshot.Snapshot) error {
+	if s.calls != nil {
+		*s.calls++
+	}
+	if s.collect != nil {
+		s.collect(snap)
+	}
+	return s.err
+}
+
+func fixedClock() func() time.Time {
+	t := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	return func() time.Time { return t }
+}
+
+func TestRunRecordsSectionStatus(t *testing.T) {
+	collectors := []collector.Collector{
+		stub{name: "system", collect: func(s *snapshot.Snapshot) {
+			s.System = &snapshot.System{OS: "linux", Arch: "amd64"}
+		}},
+		stub{name: "git", err: fmt.Errorf("no repository: %w", collector.ErrUnavailable)},
+		stub{name: "node", err: errors.New("node exited 1")},
+	}
+
+	res, err := Run(context.Background(), collectors, Options{Name: "local", Now: fixedClock()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := []SectionResult{
+		{Collector: "system", Status: StatusOK},
+		{Collector: "git", Status: StatusUnavailable, Error: "no repository: collector unavailable"},
+		{Collector: "node", Status: StatusFailed, Error: "node exited 1"},
+	}
+	if len(res.Sections) != len(want) {
+		t.Fatalf("sections = %+v, want %+v", res.Sections, want)
+	}
+	for i := range want {
+		if res.Sections[i] != want[i] {
+			t.Fatalf("section %d = %+v, want %+v", i, res.Sections[i], want[i])
+		}
+	}
+
+	// A tool that exists but misbehaves is a failure the user must see; a tool
+	// that is simply absent is not.
+	if !res.Failed() {
+		t.Error("Failed() = false, want true when a collector errored")
+	}
+	if res.Snapshot.System == nil {
+		t.Error("a failing collector must not discard what the others observed")
+	}
+}
+
+func TestRunUnavailableCollectorsAreNotFailures(t *testing.T) {
+	collectors := []collector.Collector{
+		stub{name: "node", err: fmt.Errorf("not installed: %w", collector.ErrUnavailable)},
+	}
+	res, err := Run(context.Background(), collectors, Options{Name: "local", Now: fixedClock()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Failed() {
+		t.Error("Failed() = true, want false: a missing optional runtime is normal")
+	}
+}
+
+func TestRunNormalizesSnapshot(t *testing.T) {
+	collectors := []collector.Collector{
+		stub{name: "runtimes", collect: func(s *snapshot.Snapshot) {
+			s.Runtimes = []snapshot.Runtime{{Name: "node", Version: "24"}, {Name: "go", Version: "1.25"}}
+			s.Environment = &snapshot.Environment{Names: []string{"Z", "A"}}
+		}},
+	}
+	res, err := Run(context.Background(), collectors, Options{Name: "local", Now: fixedClock()})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Snapshot.Runtimes[0].Name != "go" {
+		t.Errorf("runtimes not sorted: %+v", res.Snapshot.Runtimes)
+	}
+	if res.Snapshot.Environment.Names[0] != "A" {
+		t.Errorf("environment names not sorted: %+v", res.Snapshot.Environment.Names)
+	}
+	if res.Snapshot.SchemaVersion != snapshot.SchemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d", res.Snapshot.SchemaVersion, snapshot.SchemaVersion)
+	}
+	if !res.Snapshot.CreatedAt.Equal(fixedClock()()) {
+		t.Errorf("CreatedAt = %v, want the injected clock value", res.Snapshot.CreatedAt)
+	}
+}
+
+// A cancelled capture must not be presented as a complete picture of the
+// environment, so it fails instead of returning a half-filled snapshot.
+func TestRunCancelledContextStopsEarly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	calls := 0
+	collectors := []collector.Collector{stub{name: "system", calls: &calls}}
+
+	res, err := Run(ctx, collectors, Options{Name: "local", Now: fixedClock()})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if res != nil {
+		t.Errorf("Run() = %+v, want nil result on cancellation", res)
+	}
+	if calls != 0 {
+		t.Errorf("collector ran %d times after cancellation, want 0", calls)
+	}
+}
+
+func TestRunRejectsInvalidName(t *testing.T) {
+	for _, name := range []string{"", "../escape", "a/b"} {
+		if _, err := Run(context.Background(), nil, Options{Name: name, Now: fixedClock()}); err == nil {
+			t.Errorf("Run(name=%q) = nil error, want a validation failure", name)
+		}
+	}
+}
+
+// Without an injected clock the capture still has to be stamped, otherwise
+// snapshots would be indistinguishable in time.
+func TestRunDefaultsClock(t *testing.T) {
+	res, err := Run(context.Background(), nil, Options{Name: "local"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Snapshot.CreatedAt.IsZero() {
+		t.Error("CreatedAt is zero, want the current time")
+	}
+}

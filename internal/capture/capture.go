@@ -1,0 +1,109 @@
+// Package capture runs collectors and assembles a snapshot of the current
+// environment.
+package capture
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/collector"
+	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
+)
+
+// Status is the outcome of one collector.
+type Status string
+
+const (
+	// StatusOK means the collector observed its section.
+	StatusOK Status = "ok"
+	// StatusUnavailable means the collector had nothing to observe here (no
+	// Git repository, runtime not installed). This is normal, not a failure.
+	StatusUnavailable Status = "unavailable"
+	// StatusFailed means the collector was expected to work and did not.
+	StatusFailed Status = "failed"
+)
+
+// SectionResult reports how one collector fared, so the renderer can show the
+// user what was and was not observed instead of silently omitting sections.
+type SectionResult struct {
+	Collector string `json:"collector"`
+	Status    Status `json:"status"`
+	// Error is the failure message for StatusFailed and the reason for
+	// StatusUnavailable. It never contains environment values.
+	Error string `json:"error,omitempty"`
+}
+
+// Result is a completed capture: the snapshot plus per-collector status.
+type Result struct {
+	Snapshot *snapshot.Snapshot `json:"snapshot"`
+	Sections []SectionResult    `json:"sections"`
+}
+
+// Failed reports whether any collector failed outright. Unavailable sections do
+// not count: a machine without Node still produces a useful snapshot.
+func (r *Result) Failed() bool {
+	for _, s := range r.Sections {
+		if s.Status == StatusFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// Options configures a capture run.
+type Options struct {
+	// Name identifies the snapshot ("local", "staging").
+	Name string
+	// Now supplies the capture timestamp; tests inject a fixed clock so golden
+	// output stays stable.
+	Now func() time.Time
+}
+
+// Run executes collectors in order and returns the assembled snapshot.
+//
+// Collectors run sequentially. They are process spawns measured in
+// milliseconds, and sequential execution keeps the snapshot deterministic
+// without any synchronization around the shared snapshot value.
+// ponytail: if the collector set grows to something slow (Docker, databases),
+// parallelize per-section with each collector writing only its own field.
+//
+// A collector reporting ErrUnavailable leaves its section absent and the
+// capture continues; any other collector error is recorded and surfaces through
+// Result.Failed, because a tool that exists but misbehaves is evidence the user
+// needs, not something to hide.
+func Run(ctx context.Context, collectors []collector.Collector, opts Options) (*Result, error) {
+	if err := snapshot.ValidateName(opts.Name); err != nil {
+		return nil, err
+	}
+	now := opts.Now
+	if now == nil {
+		now = time.Now
+	}
+
+	snap := snapshot.New(opts.Name, now())
+	result := &Result{Snapshot: snap, Sections: make([]SectionResult, 0, len(collectors))}
+
+	for _, c := range collectors {
+		// A cancelled context aborts the whole capture: a partial snapshot
+		// presented as complete would be misleading evidence.
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("capture cancelled during %q: %w", c.Name(), err)
+		}
+		section := SectionResult{Collector: c.Name(), Status: StatusOK}
+		switch err := c.Collect(ctx, snap); {
+		case err == nil:
+		case errors.Is(err, collector.ErrUnavailable):
+			section.Status = StatusUnavailable
+			section.Error = err.Error()
+		default:
+			section.Status = StatusFailed
+			section.Error = err.Error()
+		}
+		result.Sections = append(result.Sections, section)
+	}
+
+	snap.Normalize()
+	return result, nil
+}

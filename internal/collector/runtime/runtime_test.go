@@ -3,8 +3,12 @@ package runtime
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/nyrvo-dev/nyrvo/internal/collector"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
@@ -155,5 +159,52 @@ func TestEveryRuntimeHasADistinctName(t *testing.T) {
 			t.Fatalf("two runtime collectors are both named %q", c.Name())
 		}
 		seen[c.Name()] = true
+	}
+}
+
+func TestProbeThatRefusesToAnswerIsUnavailableNotFatal(t *testing.T) {
+	dir := t.TempDir()
+	// A binary that exists and exits non-zero is what rustup, rbenv and pyenv
+	// all produce when a project pins a toolchain the machine does not have.
+	// That is the drift Nyrvo is being run to find, not a reason to throw away
+	// every other observation in the capture.
+	script := filepath.Join(dir, "nyrvo-refuses")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"error: Missing manifest in toolchain\" >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := newCollector("refuses", probe{binary: "nyrvo-refuses", args: []string{"--version"}})
+	snap := snapshot.New("local", time.Time{})
+	err := c.Collect(context.Background(), snap)
+
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	// The reason has to survive: "not installed" and "installed but unusable
+	// here" are different answers and the second one is the interesting one.
+	if !strings.Contains(err.Error(), "Missing manifest") {
+		t.Errorf("Collect() error = %q, want the probe's own complaint in it", err)
+	}
+	if len(snap.Runtimes) != 0 {
+		t.Errorf("a runtime that never answered was recorded: %+v", snap.Runtimes)
+	}
+}
+
+func TestUnparseableVersionIsUnavailableNotFatal(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(dir, "nyrvo-babbles")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'not a version at all'\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := newCollector("babbles", probe{binary: "nyrvo-babbles", args: []string{"--version"}})
+	snap := snapshot.New("local", time.Time{})
+	if err := c.Collect(context.Background(), snap); !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if len(snap.Runtimes) != 0 {
+		t.Errorf("an unparseable version was recorded: %+v", snap.Runtimes)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
+	"github.com/nyrvo-dev/nyrvo/internal/collector"
 	"github.com/nyrvo-dev/nyrvo/internal/diff"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
@@ -44,6 +45,15 @@ func CaptureText(w io.Writer, res *capture.Result) error {
 		case capture.StatusOK:
 			fmt.Fprintf(&b, "  ok        %s\n", s.Collector)
 		case capture.StatusUnavailable:
+			// "Not available" covers two very different situations: nothing is
+			// installed, and something is installed but refused to answer —
+			// rustc under a toolchain the machine does not have, rbenv on a
+			// version that was never installed. The second is often the drift
+			// the user is capturing to find, so its reason is printed.
+			if reason := unavailableReason(s); reason != "" {
+				fmt.Fprintf(&b, "  skipped   %s (%s)\n", s.Collector, reason)
+				continue
+			}
 			fmt.Fprintf(&b, "  skipped   %s (not available here)\n", s.Collector)
 		default:
 			fmt.Fprintf(&b, "  FAILED    %s: %s\n", s.Collector, s.Error)
@@ -51,6 +61,18 @@ func CaptureText(w io.Writer, res *capture.Result) error {
 	}
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// unavailableReason pulls the explanation out of a wrapped ErrUnavailable,
+// returning "" when the message says nothing the collector's own name does not
+// already say.
+func unavailableReason(s capture.SectionResult) string {
+	reason := strings.TrimSuffix(s.Error, ": "+collector.ErrUnavailable.Error())
+	reason = strings.TrimPrefix(reason, s.Collector+": ")
+	if reason == "" || reason == s.Collector {
+		return ""
+	}
+	return reason
 }
 
 // DiffText renders semantic differences grouped by component.

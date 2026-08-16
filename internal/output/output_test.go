@@ -168,12 +168,19 @@ func TestCaptureTextStatusLines(t *testing.T) {
 		Sections: []capture.SectionResult{
 			{Collector: "system", Status: capture.StatusOK},
 			{Collector: "git", Status: capture.StatusUnavailable, Error: "not a git repository"},
+			// A runtime that is installed and refuses to answer carries the
+			// reason, which is often the drift the capture was run to find.
+			{Collector: "rust", Status: capture.StatusUnavailable, Error: "rust: rustc --version: exit status 1: Missing manifest: collector unavailable"},
+			// One that is simply absent says nothing beyond its own name.
+			{Collector: "ruby", Status: capture.StatusUnavailable, Error: "ruby: collector unavailable"},
 			{Collector: "python", Status: capture.StatusFailed, Error: "boom: exit status 1"},
 		},
 	}
 	want := "Capturing environment...\n\n" +
 		"  ok        system\n" +
-		"  skipped   git (not available here)\n" +
+		"  skipped   git (not a git repository)\n" +
+		"  skipped   rust (rustc --version: exit status 1: Missing manifest)\n" +
+		"  skipped   ruby (not available here)\n" +
 		"  FAILED    python: boom: exit status 1\n"
 	if got := render(t, func(w io.Writer) error { return CaptureText(w, res) }); got != want {
 		t.Errorf("CaptureText status lines\ngot:\n%q\nwant:\n%q", got, want)

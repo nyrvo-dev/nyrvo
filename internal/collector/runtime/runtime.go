@@ -64,6 +64,10 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 		// the caller's own failure to stop.
 		return err
 	}
+	// why remembers the last probe's complaint. A runtime that is installed but
+	// refuses to answer has a reason, and that reason is the useful part: it is
+	// usually the very drift the user is capturing to find.
+	var why error
 	for _, p := range c.probes {
 		path, err := collector.LookPath(p.binary)
 		if err != nil {
@@ -76,16 +80,23 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 		}
 		out, err := collector.Run(ctx, p.binary, p.args...)
 		if err != nil {
-			if errors.Is(err, collector.ErrUnavailable) {
-				continue
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				// A cancelled capture is the caller's own failure and must never
+				// be reported as a runtime that happens to be unusable.
+				return ctxErr
 			}
-			// A failed invocation is a real problem for capture to report,
-			// not a reason to fall back to a different binary.
-			return err
+			// The binary exists and would not answer. A project pinning a
+			// toolchain this machine does not have makes rustc, rbenv and pyenv
+			// all exit non-zero, and that situation is exactly what Nyrvo is
+			// being run to discover — aborting the capture over it would throw
+			// away every other observation to report the one the user wanted.
+			why = err
+			continue
 		}
 		version, err := NormalizeVersion(out)
 		if err != nil {
-			return err
+			why = fmt.Errorf("%s %v: %w", p.binary, p.args, err)
+			continue
 		}
 		snap.Runtimes = append(snap.Runtimes, snapshot.Runtime{
 			Name:    c.name,
@@ -94,8 +105,14 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 		})
 		return nil
 	}
-	// Every probe reported ErrUnavailable; hand the sentinel back wrapped so
-	// capture records the section as absent instead of failing.
+	// No probe produced a version; hand the sentinel back wrapped so capture
+	// records the runtime as absent instead of failing. When a probe did run and
+	// refused, its complaint travels with the sentinel: "not installed" and
+	// "installed but pinned to a toolchain you do not have" are different
+	// answers, and the second one is the interesting one.
+	if why != nil {
+		return fmt.Errorf("%s: %v: %w", c.name, why, collector.ErrUnavailable)
+	}
 	return fmt.Errorf("%s: %w", c.name, collector.ErrUnavailable)
 }
 

@@ -70,6 +70,11 @@ func (r Requirements) Collect(_ context.Context, snap *snapshot.Snapshot) error 
 	reqs = append(reqs, nvmrcReqs(dir)...)
 	reqs = append(reqs, pythonVersionReqs(dir)...)
 	reqs = append(reqs, toolVersionsReqs(dir)...)
+	reqs = append(reqs, rubyVersionReqs(dir)...)
+	reqs = append(reqs, gemfileReqs(dir)...)
+	reqs = append(reqs, composerJSONReqs(dir)...)
+	reqs = append(reqs, rustReqs(dir)...)
+	reqs = append(reqs, javaVersionReqs(dir)...)
 
 	if len(reqs) == 0 {
 		return fmt.Errorf("no requirement sources in %s: %w", dir, collector.ErrUnavailable)
@@ -218,6 +223,9 @@ func toolVersionsReqs(dir string) []snapshot.Requirement {
 		"golang": "go",
 		"go":     "go",
 		"python": "python",
+	}
+	for alias, runtime := range extraToolVersionAliases() {
+		runtimeFor[alias] = runtime
 	}
 	var reqs []snapshot.Requirement
 	for _, line := range strings.Split(string(body), "\n") {

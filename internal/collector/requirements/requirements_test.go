@@ -147,11 +147,14 @@ terraform 1.9.0
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	// The two unknown tools are dropped rather than given invented runtime names.
+	// terraform is dropped rather than given an invented runtime name: nothing
+	// downstream can match a runtime Nyrvo does not observe. ruby is kept now
+	// that it is one Nyrvo does.
 	want := []snapshot.Requirement{
 		req("go", "1.26.1", ".tool-versions"),
 		req("node", "20.11.1", ".tool-versions"),
 		req("python", "3.11", ".tool-versions"),
+		req("ruby", "3.2.2", ".tool-versions"),
 	}
 	if !reflect.DeepEqual(snap.Requirements, want) {
 		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)
@@ -297,6 +300,9 @@ func TestCommentsAndBlankLinesSkipped(t *testing.T) {
 		req("node", "20.11.1", ".nvmrc"),
 		req("node", "20.11.1", ".tool-versions"),
 		req("python", "3.11", ".python-version"),
+		// ruby used to be dropped here because it was not in the alias map, and
+		// this test asserted that loss as correct behaviour.
+		req("ruby", "3.2.2", ".tool-versions"),
 	}
 	if !reflect.DeepEqual(snap.Requirements, want) {
 		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)

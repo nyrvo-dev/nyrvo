@@ -36,12 +36,14 @@ Collector -> Snapshot -> Diff -> (later) Finding -> Doctor
 | --- | --- |
 | `internal/snapshot` | the core contract: snapshot shape, canonical JSON, on-disk store |
 | `internal/collector` | `Collector` interface, `ErrUnavailable`, the external-command helper |
-| `internal/collector/*` | one collector per observed area (system, git, runtime, docker, requirements, env) |
+| `internal/collector/*` | one collector per observed area (system, git, runtime, docker and its running containers, requirements, env) |
 | `internal/capture` | runs collectors, tolerates unavailable ones, assembles the snapshot |
 | `internal/ci/githubactions` | parses workflow files and derives the environment a job declares |
 | `internal/finding` | what a diagnosis is: rule ids, severities, findings |
 | `internal/diagnostic` | deterministic rules that turn differences — or a project's own declared requirements — into findings |
 | `internal/diff` | semantic comparison of two snapshots |
+| `internal/analysis` | builds the evidence document an AI agent is given, and the prompt it reads |
+| `internal/agent` | runs the user's own agent CLI; takes a string, so it cannot send more than the prompt |
 | `internal/output` | terminal and JSON rendering |
 | `internal/cli` | commands, flags, exit codes |
 

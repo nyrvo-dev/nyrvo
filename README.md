@@ -10,7 +10,8 @@ today: capture, diff, reading CI configuration, importing a run that happened,
 and deterministic diagnosis. `nyrvo ci replay` prints what a job does; it never
 runs it, and `nyrvo doctor --ai` prints a request for your own agent while
 `--agent=` hands it to an agent CLI you already installed. Not yet available:
-database collectors, and executing anything else on your behalf.
+inspecting a database's own schema or settings, configuration files, and
+executing anything else on your behalf.
 
 ## Why
 
@@ -268,7 +269,7 @@ $ nyrvo version
 
 - OS, CPU architecture, and kernel
 - Git commit SHA, branch, and whether the working tree is dirty
-- Go, Node.js, Python, Ruby, PHP, Rust and Java versions (including install
+- Go, npm, Node.js, Python, Ruby, PHP, Rust and Java versions (including install
   paths)
 - Docker client, server, and compose versions, and whether the daemon answers
 - The container images running here, and the services a CI job declares

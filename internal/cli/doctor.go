@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/nyrvo-dev/nyrvo/internal/agent"
 	"github.com/nyrvo-dev/nyrvo/internal/analysis"
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/ci/githubactions"
@@ -33,6 +34,10 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	// hand a user's environment to anything, and a flag is the smallest thing
 	// that makes the choice visible in the command the user typed.
 	withAI := fs.Bool("ai", false, "also print an analysis request to hand to your own AI agent")
+	// Like --fail-on, this takes a value and so must be written --agent=claude:
+	// splitFlags separates flags from operands assuming every flag is boolean,
+	// and the separate form cannot be told apart from a snapshot named "claude".
+	agentName := fs.String("agent", "", "run the analysis request through an installed agent CLI ("+strings.Join(agent.Names(), ", ")+")")
 	// failOn is the only flag in Nyrvo that takes a value, so it must be
 	// written --fail-on=high: splitFlags separates flags from operands on the
 	// assumption that every flag is boolean. Writing them apart fails loudly
@@ -41,7 +46,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	flags, operands := splitFlags(args)
 	if err := fs.Parse(flags); err != nil {
 		if strings.Contains(err.Error(), "needs an argument") {
-			return usageErr("doctor: %v (write it as --fail-on=high)", err)
+			return usageErr("doctor: %v (write it as --flag=value)", err)
 		}
 		return usageErr("doctor: %v", err)
 	}
@@ -49,6 +54,14 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	if err != nil {
 		return err
 	}
+	selected, err := selectAgent(*agentName)
+	if err != nil {
+		return err
+	}
+	// Naming an agent is asking for it to run, so it opts into the AI layer on
+	// its own. Requiring --ai alongside it would only be ceremony: the choice is
+	// already visible in the command the user typed.
+	useAI := *withAI || selected != nil
 
 	a, b := defaultDoctorA, defaultDoctorB
 	var snapA, snapB *snapshot.Snapshot
@@ -110,10 +123,29 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	// two low-severity platform differences and never mention the failure.
 	context := evidenceContext(snapA, snapB)
 
-	if err := writeDiagnosis(stdout, a, b, snapA, snapB, differences, findings, context, *asJSON, *withAI); err != nil {
+	if err := writeDiagnosis(ctx, stdout, stderr, a, b, snapA, snapB, differences, findings, context, *asJSON, useAI, selected); err != nil {
 		return err
 	}
 	return failOnThreshold(stderr, findings, threshold)
+}
+
+// selectAgent resolves --agent. An unknown name is a usage error naming the
+// alternatives, and an agent that is not installed is reported before any
+// evidence is gathered: the user's next step is to install it or pick another,
+// and neither is helped by a diagnosis appearing first.
+func selectAgent(name string) (*agent.Agent, error) {
+	if name == "" {
+		return nil, nil
+	}
+	selected, ok := agent.Lookup(name)
+	if !ok {
+		return nil, usageErr("--agent=%s is not an agent Nyrvo knows; use one of %s", name, strings.Join(agent.Names(), ", "))
+	}
+	if !selected.Available() {
+		return nil, fmt.Errorf("%s is not installed; install it, choose another agent (%s), or run --ai alone to print the request and paste it yourself",
+			name, strings.Join(agent.Names(), ", "))
+	}
+	return &selected, nil
 }
 
 // writeDiagnosis renders the report the user asked for.
@@ -123,32 +155,70 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 // pipe into a parser, and the request already carries the findings the
 // diagnosis document would have repeated.
 func writeDiagnosis(
-	stdout io.Writer,
+	ctx context.Context,
+	stdout, stderr io.Writer,
 	a, b string,
 	snapA, snapB *snapshot.Snapshot,
 	differences *diff.Result,
 	findings []finding.Finding,
-	context []string,
+	notes []string,
 	asJSON, withAI bool,
+	selected *agent.Agent,
 ) error {
 	if withAI {
-		in := analysis.Build(snapA, snapB, differences, findings, context)
+		in := analysis.Build(snapA, snapB, differences, findings, notes)
 		prompt := analysis.Prompt(in)
-		if asJSON {
-			return output.AIRequestJSON(stdout, in, prompt)
-		}
 		// The deterministic report is printed first and in full. What Nyrvo
 		// established on its own is the part that does not depend on a model,
 		// and it should be readable by someone who never pastes the request.
-		if err := output.DoctorText(stdout, a, b, findings, context...); err != nil {
-			return err
+		if !asJSON {
+			if err := output.DoctorText(stdout, a, b, findings, notes...); err != nil {
+				return err
+			}
 		}
-		return output.AIRequestText(stdout, in, prompt)
+		if selected == nil {
+			if asJSON {
+				return output.AIRequestJSON(stdout, in, prompt)
+			}
+			return output.AIRequestText(stdout, in, prompt)
+		}
+		return runAgent(ctx, stdout, stderr, in, prompt, *selected, asJSON)
 	}
 	if asJSON {
-		return output.DoctorJSON(stdout, a, b, findings, context...)
+		return output.DoctorJSON(stdout, a, b, findings, notes...)
 	}
-	return output.DoctorText(stdout, a, b, findings, context...)
+	return output.DoctorText(stdout, a, b, findings, notes...)
+}
+
+// runAgent discloses what is about to happen, runs the agent, and prints its
+// answer under a heading of its own.
+//
+// The disclosure goes to stderr under --json for the same reason progress
+// always does: stdout must stay a single document a consumer can parse. It is
+// still written before the agent runs, which is the part that matters — a
+// disclosure a user reads after the request has already left is not one.
+func runAgent(ctx context.Context, stdout, stderr io.Writer, in analysis.Input, prompt string, selected agent.Agent, asJSON bool) error {
+	disclosureTo := stdout
+	if asJSON {
+		disclosureTo = stderr
+	}
+	command := selected.Command(prompt)
+	if err := output.AIAgentDisclosure(disclosureTo, selected.Name(), command); err != nil {
+		return err
+	}
+
+	result, err := selected.Analyze(ctx, prompt)
+	if err != nil {
+		if errors.Is(err, agent.ErrUnavailable) {
+			return fmt.Errorf("%w; run --ai alone to print the request and paste it yourself", err)
+		}
+		return err
+	}
+
+	if asJSON {
+		return output.AIResultJSON(stdout, in, prompt, selected.Name(), command, result)
+	}
+	return output.AIAnalysisText(stdout, selected.Name(), result)
 }
 
 // severityRank orders severities for the --fail-on threshold. It is separate

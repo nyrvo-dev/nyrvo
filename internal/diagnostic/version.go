@@ -16,16 +16,19 @@ import (
 // Matching is per segment, not per character, so a declared "2" is not
 // satisfied by "20": segment equality is what version numbers actually mean.
 func Satisfies(declared, observed string) bool {
-	d := segments(declared)
-	o := segments(observed)
-	if len(d) == 0 || len(o) == 0 || len(d) > len(o) {
-		// A declaration more precise than the observation cannot be confirmed;
-		// callers treat that as a mismatch worth reporting rather than a silent
-		// pass.
+	return prefixMatch(segments(declared), segments(observed))
+}
+
+// prefixMatch reports whether every segment a declaration states is matched by
+// the observation. A declaration more precise than the observation cannot be
+// confirmed; callers treat that as a mismatch worth reporting rather than a
+// silent pass.
+func prefixMatch(declared, observed []int) bool {
+	if len(declared) == 0 || len(observed) == 0 || len(declared) > len(observed) {
 		return false
 	}
-	for i := range d {
-		if d[i] != o[i] {
+	for i := range declared {
+		if declared[i] != observed[i] {
 			return false
 		}
 	}

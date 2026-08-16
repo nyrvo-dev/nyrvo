@@ -84,6 +84,7 @@ func Run(rules []Rule, in Input) []finding.Finding {
 func DefaultRules() []Rule {
 	var rules []Rule
 	rules = append(rules, RuntimeRules()...)
+	rules = append(rules, RequirementRules()...)
 	rules = append(rules, SystemRules()...)
 	rules = append(rules, GitRules()...)
 	rules = append(rules, EnvironmentRules()...)

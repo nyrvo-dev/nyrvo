@@ -40,6 +40,12 @@ const (
 	RuntimeVersionMismatch = "runtime.version_mismatch"
 	// RuntimeMissing: one environment has a runtime the other does not.
 	RuntimeMissing = "runtime.missing"
+	// RuntimeRequirementUnsatisfied: the project declares a version constraint
+	// that an environment does not meet. Unlike every other rule, this one does
+	// not compare two environments — it compares an environment against what
+	// the project itself asked for, which is why it is the only rule that can
+	// call a setup wrong rather than merely different.
+	RuntimeRequirementUnsatisfied = "runtime.requirement_unsatisfied"
 	// EnvMissing: a variable one environment declares is absent from the other.
 	EnvMissing = "env.missing"
 	// SystemOSMismatch and SystemArchMismatch: the two environments are not the

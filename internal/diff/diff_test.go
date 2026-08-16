@@ -119,14 +119,30 @@ func TestMissingSectionsDoNotPanic(t *testing.T) {
 	full := base("local")
 	empty := snapshot.New("bare", time.Now())
 
+	// A section the other side never described is one difference, not one per
+	// key: three "missing" lines for git would read as if the other environment
+	// had been inspected and found to be on another commit.
 	got := Compare(full, empty)
-	if len(got.Differences) == 0 {
-		t.Fatal("expected the fully observed side to report only_in_a differences")
+	want := []Difference{
+		{Component: ComponentSystem, Kind: KindOnlyInA, A: described},
+		{Component: ComponentGit, Kind: KindOnlyInA, A: described},
+		{Component: ComponentRuntime, Kind: KindOnlyInA, A: described},
+		{Component: ComponentEnvironment, Kind: KindOnlyInA, A: described},
 	}
-	for _, d := range got.Differences {
-		if d.Kind != KindOnlyInA {
-			t.Fatalf("unexpected kind %q for %s/%s", d.Kind, d.Component, d.Key)
+	if len(got.Differences) != len(want) {
+		t.Fatalf("got %+v, want one difference per described section: %+v", got.Differences, want)
+	}
+	for i := range want {
+		if got.Differences[i] != want[i] {
+			t.Fatalf("difference %d = %+v, want %+v", i, got.Differences[i], want[i])
 		}
+	}
+
+	// The mirror case reports the same way from the other side.
+	if mirrored := Compare(empty, full); len(mirrored.Differences) != len(want) {
+		t.Fatalf("mirrored comparison = %+v, want %d whole-section differences", mirrored.Differences, len(want))
+	} else if mirrored.Differences[0].Kind != KindOnlyInB {
+		t.Fatalf("mirrored kind = %q, want %q", mirrored.Differences[0].Kind, KindOnlyInB)
 	}
 
 	if got := Compare(empty, snapshot.New("bare2", time.Now())); !got.Empty() {
@@ -164,6 +180,78 @@ func TestOptionalFieldsAbsentOnOneSide(t *testing.T) {
 	a.Git.Branch = ""
 	if got := Compare(a, b); !got.Empty() {
 		t.Fatalf("fields absent on both sides produced differences: %+v", got.Differences)
+	}
+}
+
+// A CI-derived environment lists only what the workflow sets. Reporting every
+// local variable it does not mention as "missing in ci" would bury the real
+// findings under one line per shell variable, so those absences are suppressed
+// while the variables CI does declare are still compared.
+func TestPartialEnvironmentSuppressesAbsences(t *testing.T) {
+	local := base("local")
+	local.Environment.Names = []string{"DATABASE_URL", "HOME", "PATH", "SHELL", "TERM"}
+
+	ci := base("ci")
+	ci.System = nil
+	ci.Git = nil
+	ci.Runtimes = nil
+	ci.Environment = &snapshot.Environment{Names: []string{"CI", "DATABASE_URL"}, Partial: true}
+
+	got := Compare(local, ci)
+	if !got.PartialEnvironment {
+		t.Error("PartialEnvironment = false, want true so the reader knows the comparison was narrowed")
+	}
+
+	var envDiffs []Difference
+	for _, d := range got.Differences {
+		if d.Component == ComponentEnvironment {
+			envDiffs = append(envDiffs, d)
+		}
+	}
+	want := []Difference{{Component: ComponentEnvironment, Key: "CI", Kind: KindOnlyInB, B: present}}
+	if len(envDiffs) != len(want) || envDiffs[0] != want[0] {
+		t.Fatalf("environment differences = %+v, want %+v", envDiffs, want)
+	}
+
+	// Suppression is one-directional: the complete side can still testify to
+	// absence, and the partial side's own declarations are still compared.
+	reversed := Compare(ci, local)
+	var reversedEnv []Difference
+	for _, d := range reversed.Differences {
+		if d.Component == ComponentEnvironment {
+			reversedEnv = append(reversedEnv, d)
+		}
+	}
+	wantReversed := Difference{Component: ComponentEnvironment, Key: "CI", Kind: KindOnlyInA, A: present}
+	if len(reversedEnv) != 1 || reversedEnv[0] != wantReversed {
+		t.Fatalf("reversed environment differences = %+v, want %+v", reversedEnv, wantReversed)
+	}
+
+	// Sections other than environment are unaffected by partiality.
+	if len(got.Differences) <= len(envDiffs) {
+		t.Error("partial environments must not suppress system, git or runtime differences")
+	}
+}
+
+// Partiality is about the environment list only; nothing else changes when
+// both sides are complete.
+func TestCompleteEnvironmentsStillReportAbsences(t *testing.T) {
+	a := base("local")
+	b := base("other")
+	b.Environment = &snapshot.Environment{Names: []string{"PATH"}}
+
+	got := Compare(a, b)
+	if got.PartialEnvironment {
+		t.Error("PartialEnvironment = true for two complete environments")
+	}
+	found := 0
+	for _, d := range got.Differences {
+		if d.Component == ComponentEnvironment && d.Kind == KindOnlyInA {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("got %d only_in_a environment differences, want 2 (DATABASE_URL, REDIS_URL)", found)
 	}
 }
 

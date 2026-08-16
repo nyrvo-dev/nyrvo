@@ -63,6 +63,10 @@ type Result struct {
 	A             string       `json:"a"`
 	B             string       `json:"b"`
 	Differences   []Difference `json:"differences"`
+	// PartialEnvironment reports that one side's environment list was known to
+	// be incomplete, so variables absent from it were not compared. Consumers
+	// must surface this: the comparison is narrower than it looks.
+	PartialEnvironment bool `json:"partial_environment,omitempty"`
 }
 
 // Empty reports whether the two environments are semantically identical.
@@ -71,6 +75,11 @@ func (r *Result) Empty() bool { return len(r.Differences) == 0 }
 // present is the recorded value for an environment variable. Only its
 // existence is ever known, so the diff compares presence, not content.
 const present = "present"
+
+// described is the value of a whole-section difference: one side described the
+// component and the other did not describe it at all. A difference carrying it
+// has an empty Key.
+const described = "described"
 
 // Compare returns the semantic differences between snapshots a and b.
 //
@@ -85,10 +94,22 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 		res.B = b.Name
 	}
 
-	compareSection(res, ComponentSystem, systemValues(a), systemValues(b))
-	compareSection(res, ComponentGit, gitValues(a), gitValues(b))
-	compareSection(res, ComponentRuntime, runtimeValues(a), runtimeValues(b))
-	compareSection(res, ComponentEnvironment, environmentValues(a), environmentValues(b))
+	compareSection(res, ComponentSystem, systemValues(a), systemValues(b), report{a: true, b: true})
+	compareSection(res, ComponentGit, gitValues(a), gitValues(b), report{a: true, b: true})
+	compareSection(res, ComponentRuntime, runtimeValues(a), runtimeValues(b), report{a: true, b: true})
+	// An environment list that is only partial (a CI workflow states the
+	// variables it sets, not the ones the runner adds) cannot testify to
+	// absence, so absences the other side could not have reported are not
+	// treated as drift. Result.PartialEnvironment tells the reader this
+	// happened, because a silently narrowed comparison would be worse than a
+	// noisy one.
+	compareSection(res, ComponentEnvironment, environmentValues(a), environmentValues(b), report{
+		a: !partialEnvironment(b),
+		b: !partialEnvironment(a),
+	})
+	if partialEnvironment(a) || partialEnvironment(b) {
+		res.PartialEnvironment = true
+	}
 
 	sort.SliceStable(res.Differences, func(i, j int) bool {
 		di, dj := res.Differences[i], res.Differences[j]
@@ -100,10 +121,44 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 	return res
 }
 
+// report says which one-sided observations are worth reporting for a section.
+// Both fields are true for every section whose sides are equally complete;
+// environment lists are not always equally complete.
+type report struct {
+	// a reports observations found only in the first snapshot, b only in the
+	// second.
+	a, b bool
+}
+
+func partialEnvironment(s *snapshot.Snapshot) bool {
+	return s != nil && s.Environment != nil && s.Environment.Partial
+}
+
 // compareSection diffs one component as a keyed map. Representing every section
 // this way means an absent section needs no special case: it simply contributes
 // no keys, and its observations show up as only_in_*.
-func compareSection(res *Result, component string, a, b map[string]string) {
+func compareSection(res *Result, component string, a, b map[string]string, rep report) {
+	// A section one side never described at all is reported once, not once per
+	// key. Listing "sha missing, branch missing, dirty missing" for a CI
+	// snapshot reads as if CI had a clean checkout on some other commit, when
+	// the truth is simply that a workflow file says nothing about git.
+	switch {
+	case len(a) > 0 && len(b) == 0:
+		if rep.a {
+			res.Differences = append(res.Differences, Difference{
+				Component: component, Kind: KindOnlyInA, A: described,
+			})
+		}
+		return
+	case len(b) > 0 && len(a) == 0:
+		if rep.b {
+			res.Differences = append(res.Differences, Difference{
+				Component: component, Kind: KindOnlyInB, B: described,
+			})
+		}
+		return
+	}
+
 	keys := make([]string, 0, len(a)+len(b))
 	for k := range a {
 		keys = append(keys, k)
@@ -126,13 +181,17 @@ func compareSection(res *Result, component string, a, b map[string]string) {
 				})
 			}
 		case inA:
-			res.Differences = append(res.Differences, Difference{
-				Component: component, Key: k, Kind: KindOnlyInA, A: av,
-			})
+			if rep.a {
+				res.Differences = append(res.Differences, Difference{
+					Component: component, Key: k, Kind: KindOnlyInA, A: av,
+				})
+			}
 		default:
-			res.Differences = append(res.Differences, Difference{
-				Component: component, Key: k, Kind: KindOnlyInB, B: bv,
-			})
+			if rep.b {
+				res.Differences = append(res.Differences, Difference{
+					Component: component, Key: k, Kind: KindOnlyInB, B: bv,
+				})
+			}
 		}
 	}
 }

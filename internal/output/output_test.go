@@ -114,6 +114,55 @@ func TestDiffTextSpellsOutAbsentSide(t *testing.T) {
 	}
 }
 
+// A whole-section difference (empty key) must read as "the other side never
+// described this", not as an observation that came back empty.
+func TestDiffTextWholeSectionDifference(t *testing.T) {
+	res := &diff.Result{
+		A: "local",
+		B: "ci",
+		Differences: []diff.Difference{
+			{Component: diff.ComponentGit, Kind: diff.KindOnlyInA, A: "described"},
+		},
+	}
+	want := "Differences between local and ci\n\nGit\n\n  described in local, not described in ci\n"
+	if got := render(t, func(w io.Writer) error { return DiffText(w, res) }); got != want {
+		t.Errorf("DiffText whole-section\ngot:\n%q\nwant:\n%q", got, want)
+	}
+
+	res.Differences[0] = diff.Difference{Component: diff.ComponentGit, Kind: diff.KindOnlyInB, B: "described"}
+	want = "Differences between local and ci\n\nGit\n\n  described in ci, not described in local\n"
+	if got := render(t, func(w io.Writer) error { return DiffText(w, res) }); got != want {
+		t.Errorf("DiffText whole-section mirrored\ngot:\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// A narrowed environment comparison must announce itself, whether or not any
+// difference was found: a report that looks exhaustive while skipping variables
+// is worse than a noisy one.
+func TestDiffTextPartialEnvironmentNote(t *testing.T) {
+	const note = "One side lists only the environment variables it declares"
+
+	empty := &diff.Result{A: "local", B: "ci", PartialEnvironment: true}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, empty) }); !strings.Contains(got, note) {
+		t.Errorf("no-differences output omits the partial-environment note:\n%q", got)
+	}
+
+	withDiff := &diff.Result{
+		A: "local", B: "ci", PartialEnvironment: true,
+		Differences: []diff.Difference{
+			{Component: diff.ComponentEnvironment, Key: "CI", Kind: diff.KindOnlyInB, B: "present"},
+		},
+	}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, withDiff) }); !strings.Contains(got, note) {
+		t.Errorf("difference output omits the partial-environment note:\n%q", got)
+	}
+
+	complete := &diff.Result{A: "local", B: "other"}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, complete) }); strings.Contains(got, note) {
+		t.Errorf("complete comparison printed the partial-environment note:\n%q", got)
+	}
+}
+
 func TestCaptureTextStatusLines(t *testing.T) {
 	res := &capture.Result{
 		Sections: []capture.SectionResult{

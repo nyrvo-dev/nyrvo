@@ -109,6 +109,16 @@ type Runtime struct {
 // See docs/adr/0003-never-store-environment-values.md.
 type Environment struct {
 	Names []string `json:"names"`
+	// Partial marks a list that is known to be incomplete. A machine can be
+	// asked for its whole environment; a CI workflow file only states the
+	// variables it sets explicitly, and says nothing about the hundreds the
+	// runner will also provide.
+	//
+	// Comparing a complete list against a partial one without this flag
+	// produces one "missing" line per variable the other side never claimed to
+	// describe, burying the few that matter. Diff uses it to suppress absences
+	// the partial side could not have reported.
+	Partial bool `json:"partial,omitempty"`
 }
 
 // New returns an empty snapshot stamped with the current schema version.

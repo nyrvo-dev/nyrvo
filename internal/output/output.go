@@ -59,7 +59,10 @@ func CaptureText(w io.Writer, res *capture.Result) error {
 // identical would bury the few lines that matter.
 func DiffText(w io.Writer, res *diff.Result) error {
 	if res.Empty() {
-		_, err := fmt.Fprintf(w, "No differences between %s and %s.\n", res.A, res.B)
+		var b strings.Builder
+		fmt.Fprintf(&b, "No differences between %s and %s.\n", res.A, res.B)
+		writePartialEnvironmentNote(&b, res)
+		_, err := io.WriteString(w, b.String())
 		return err
 	}
 
@@ -72,13 +75,36 @@ func DiffText(w io.Writer, res *diff.Result) error {
 			component = d.Component
 			fmt.Fprintf(&b, "\n%s\n\n", title(component))
 		}
+		// An empty key marks a whole section one side never described. Saying so
+		// in one line avoids implying the other side observed something and
+		// found it absent.
+		if d.Key == "" {
+			seen, missing := res.A, res.B
+			if d.Kind == diff.KindOnlyInB {
+				seen, missing = res.B, res.A
+			}
+			fmt.Fprintf(&b, "  described in %s, not described in %s\n", seen, missing)
+			continue
+		}
 		fmt.Fprintf(&b, "  %s\n", d.Key)
 		// Both sides are always shown, with an absent observation spelled out,
 		// so a reader never has to infer which environment lacks something.
 		fmt.Fprintf(&b, "    %s\t%s\n", res.A, valueOr(d.A))
 		fmt.Fprintf(&b, "    %s\t%s\n", res.B, valueOr(d.B))
 	}
+	writePartialEnvironmentNote(&b, res)
 	return writeAligned(w, b.String())
+}
+
+// writePartialEnvironmentNote tells the reader that the environment comparison
+// was narrowed. Without it the report would look exhaustive while quietly
+// skipping every variable the partial side never claimed to describe.
+func writePartialEnvironmentNote(b *strings.Builder, res *diff.Result) {
+	if !res.PartialEnvironment {
+		return
+	}
+	b.WriteString("\nOne side lists only the environment variables it declares, so variables\n")
+	b.WriteString("absent from it were not compared. Only variables it does declare are shown.\n")
 }
 
 // SnapshotList renders stored snapshot names.

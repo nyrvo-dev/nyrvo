@@ -468,3 +468,29 @@ func TestDeclaredRuntimesAreMarkedPartial(t *testing.T) {
 		t.Error("a workflow-derived runtime list was not marked partial")
 	}
 }
+
+func TestSetupActionsBeyondTheFirstPartyOnes(t *testing.T) {
+	// GitHub publishes no first-party Ruby, PHP or Rust action, so matching only
+	// actions/* would leave those ecosystems unreadable in every workflow.
+	job := &Job{ID: "test", RunsOn: []string{"ubuntu-latest"}, Steps: []Step{
+		{Uses: "actions/setup-java@v4", With: map[string]string{"java-version": "21"}},
+		{Uses: "ruby/setup-ruby@v1", With: map[string]string{"ruby-version": "3.3"}},
+		{Uses: "shivammathur/setup-php@v2", With: map[string]string{"php-version": "8.3"}},
+		{Uses: "dtolnay/rust-toolchain@stable", With: map[string]string{"toolchain": "1.75.0"}},
+	}}
+	snap, err := Snapshot(&Workflow{Path: ".github/workflows/ci.yml"}, job, "ci", time.Time{})
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	want := map[string]string{"java": "21", "ruby": "3.3", "php": "8.3", "rust": "1.75.0"}
+	got := map[string]string{}
+	for _, rt := range snap.Runtimes {
+		got[rt.Name] = rt.Version
+	}
+	for name, version := range want {
+		if got[name] != version {
+			t.Errorf("%s = %q, want %q (all runtimes: %+v)", name, got[name], version, snap.Runtimes)
+		}
+	}
+}

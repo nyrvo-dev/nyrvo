@@ -144,6 +144,17 @@ var setupActions = []setupAction{
 	{path: "actions/setup-node", runtime: "node", version: "node-version", file: "node-version-file"},
 	{path: "actions/setup-python", runtime: "python", version: "python-version", file: "python-version-file"},
 	{path: "actions/setup-go", runtime: "go", version: "go-version", file: "go-version-file"},
+	{path: "actions/setup-java", runtime: "java", version: "java-version", file: "java-version-file"},
+	// The Ruby, PHP and Rust actions are the community ones every workflow uses;
+	// GitHub publishes no first-party equivalent, so matching only actions/* here
+	// would leave those ecosystems unreadable.
+	{path: "ruby/setup-ruby", runtime: "ruby", version: "ruby-version", file: "ruby-version-file"},
+	{path: "shivammathur/setup-php", runtime: "php", version: "php-version", file: "php-version-file"},
+	// dtolnay/rust-toolchain spells the version in the action's own tag
+	// (@1.75.0, @stable) as well as in a toolchain input. Only the input is read
+	// here; a version hidden in the tag is left unknown rather than guessed,
+	// which is the same rule the rest of the parser follows.
+	{path: "dtolnay/rust-toolchain", runtime: "rust", version: "toolchain"},
 }
 
 // matchSetupAction reports the setup action a step's Uses references, or nil.

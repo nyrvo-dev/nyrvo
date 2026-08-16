@@ -54,7 +54,7 @@ Exit codes: 0 success, 1 error, 2 usage.
 // streams.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return ExitUsage
 	}
 
@@ -69,10 +69,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "version":
 		err = runVersion(stdout)
 	case "help", "-h", "--help":
-		fmt.Fprint(stdout, usage)
+		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
 	default:
-		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
+		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return ExitUsage
 	}
 
@@ -80,10 +80,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case err == nil:
 		return ExitOK
 	case errors.Is(err, errUsage):
-		fmt.Fprintf(stderr, "%v\n\n%s", err, usage)
+		_, _ = fmt.Fprintf(stderr, "%v\n\n%s", err, usage)
 		return ExitUsage
 	default:
-		fmt.Fprintf(stderr, "nyrvo: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "nyrvo: %v\n", err)
 		return ExitError
 	}
 }
@@ -178,7 +178,9 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		if err := output.CaptureText(stdout, res); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "\nSnapshot saved: %s\n", name)
+		if _, err := fmt.Fprintf(stdout, "\nSnapshot saved: %s\n", name); err != nil {
+			return err
+		}
 	}
 
 	if res.Failed() {

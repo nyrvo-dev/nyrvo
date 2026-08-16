@@ -1,0 +1,15 @@
+version: "2"
+
+# The standard linter set is deliberately kept as-is rather than curated into a
+# long enable list: it is what most Go contributors already expect, and every
+# rule here has caught something real. misspell is added because this codebase
+# leans on prose comments to explain decisions, and a typo in a comment survives
+# code review far longer than one in an identifier.
+linters:
+  default: standard
+  enable:
+    - misspell
+
+formatters:
+  enable:
+    - gofmt

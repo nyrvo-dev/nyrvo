@@ -33,19 +33,19 @@ func TestHelperProcess(t *testing.T) {
 	switch {
 	case len(args) == 0:
 		// No mode at all exercises the empty-stderr failure path.
-		fmt.Fprintln(os.Stderr, "boom on stderr")
+		_, _ = fmt.Fprintln(os.Stderr, "boom on stderr")
 		os.Exit(3)
 	case args[0] == "echo":
 		// Echo the remaining arguments joined by spaces, mirroring how a
 		// shell would print them verbatim.
-		fmt.Fprintln(os.Stdout, strings.Join(args[1:], " "))
+		_, _ = fmt.Fprintln(os.Stdout, strings.Join(args[1:], " "))
 		os.Exit(0)
 	case args[0] == "fail":
 		// Print one line to stderr and exit non-zero.
-		fmt.Fprintln(os.Stderr, args[1])
+		_, _ = fmt.Fprintln(os.Stderr, args[1])
 		os.Exit(3)
 	default:
-		fmt.Fprintf(os.Stderr, "unknown helper mode: %s\n", args[0])
+		_, _ = fmt.Fprintf(os.Stderr, "unknown helper mode: %s\n", args[0])
 		os.Exit(2)
 	}
 }

@@ -82,9 +82,11 @@ func (s *Store) Save(snap *Snapshot) error {
 		return fmt.Errorf("create snapshot file: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeds
+	// Best-effort cleanup: a no-op once the rename succeeds, and a leftover
+	// temp file is not worth failing an otherwise good save.
+	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return fmt.Errorf("write snapshot: %w", err)
 	}
 	if err := tmp.Close(); err != nil {

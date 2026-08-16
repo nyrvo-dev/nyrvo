@@ -152,6 +152,17 @@ func Node() collector.Collector {
 	return newCollector("node", probe{binary: "node", args: []string{"--version"}})
 }
 
+// NPM returns a collector for the npm package manager.
+//
+// It is a runtime here because package.json declares engines.npm separately
+// from engines.node, and that declaration was being recorded as a requirement
+// against a version nothing ever observed — a constraint that could never be
+// met or violated, only stored. npm's version is independent of Node's and its
+// lockfile format has changed across majors, so the drift is real.
+func NPM() collector.Collector {
+	return newCollector("npm", probe{binary: "npm", args: []string{"--version"}})
+}
+
 // Ruby returns a collector for the Ruby runtime.
 func Ruby() collector.Collector {
 	return newCollector("ruby", probe{binary: "ruby", args: []string{"--version"}})

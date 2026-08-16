@@ -152,6 +152,7 @@ func defaultCollectors() []collector.Collector {
 		&git.Git{},
 		runtime.Go(),
 		runtime.Node(),
+		runtime.NPM(),
 		runtime.Python(),
 		runtime.Ruby(),
 		runtime.PHP(),

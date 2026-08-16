@@ -208,3 +208,12 @@ func TestUnparseableVersionIsUnavailableNotFatal(t *testing.T) {
 		t.Errorf("an unparseable version was recorded: %+v", snap.Runtimes)
 	}
 }
+
+func TestNPMIsCollectedSoItsRequirementCanBeJudged(t *testing.T) {
+	// package.json declares engines.npm, and the requirements collector records
+	// it. Without an npm observation that constraint could never be met or
+	// violated — only stored.
+	if got := NPM().Name(); got != "npm" {
+		t.Fatalf("NPM().Name() = %q, want the name engines.npm is recorded under", got)
+	}
+}

@@ -55,6 +55,8 @@ jobs:
       # the toolchain, so repeating it across the test matrix would only add
       # duplicate findings and minutes.
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v7 is the first action release that can install golangci-lint v2;
+        # v6 rejects the version string outright rather than falling back.
+        uses: golangci/golangci-lint-action@v7
         with:
           version: v2.12.2

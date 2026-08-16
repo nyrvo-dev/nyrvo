@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
 
 // The first thing a new user types is `nyrvo doctor`, before capturing
@@ -60,11 +63,18 @@ func TestDoctorCleanRunIsHonest(t *testing.T) {
 // note.
 func TestDoctorExitsZeroWithFindings(t *testing.T) {
 	t.Chdir(t.TempDir())
-	mustCapture(t, "local")
-	mustCapture(t, "other")
+	// Two captures of one machine are identical, so the old version of this test
+	// had no findings to exit zero despite — it asserted its own name and proved
+	// nothing. These two differ by construction.
+	writeSnapshotFile(t, "here", &snapshot.System{OS: "linux", Arch: "amd64"})
+	writeSnapshotFile(t, "there", &snapshot.System{OS: "darwin", Arch: "amd64"})
 
-	if code, _, errOut := run(t, "doctor", "local", "other"); code != ExitOK {
+	code, stdout, errOut := run(t, "doctor", "here", "there")
+	if code != ExitOK {
 		t.Fatalf("exit = %d, want %d (stderr: %s)", code, ExitOK, errOut)
+	}
+	if !strings.Contains(stdout, "finding") {
+		t.Fatalf("the test needs a diagnosis with findings to be about anything:\n%s", stdout)
 	}
 }
 
@@ -242,29 +252,34 @@ func TestDoctorRunPlusJobExplainsTheTwoStepRoute(t *testing.T) {
 // never changes the exit code, because drift is an answer and a low-severity
 // note should not turn a pipeline red by default.
 func TestDoctorFailOn(t *testing.T) {
-	stub := &ciExecStub{
-		runDoc:  readFixture(t, "run-failed.json"),
-		jobsDoc: readFixture(t, "jobs-failed.json"),
-		logDoc:  readLogFixture(t, "log-failure.txt"),
-	}
-	stubCIClient(t, stub)
 	t.Chdir(t.TempDir())
+	// Two snapshots that differ in exactly one known way, rather than a capture
+	// of whatever machine runs the tests.
+	//
+	// An earlier version diagnosed a fixture run against a live capture and
+	// relied on "this yields low findings only". That held on a laptop, where
+	// darwin/arm64 disagrees with the fixture's linux/amd64, and produced no
+	// findings at all on the Linux runner, where they match — so --fail-on=low
+	// exited 0 and the suite failed on CI while passing locally. A test about
+	// drift must not itself depend on the platform it runs on.
+	writeSnapshotFile(t, "here", &snapshot.System{OS: "linux", Arch: "amd64"})
+	writeSnapshotFile(t, "there", &snapshot.System{OS: "darwin", Arch: "amd64"})
 
-	// This diagnosis yields low-severity findings only.
-	if code, _, _ := run(t, "doctor", "31921289286"); code != ExitOK {
+	// A diagnosis is an answer, so by default it never changes the exit code.
+	if code, _, _ := run(t, "doctor", "here", "there"); code != ExitOK {
 		t.Fatalf("without --fail-on: exit = %d, want %d", code, ExitOK)
 	}
-	if code, _, errOut := run(t, "doctor", "31921289286", "--fail-on=low"); code != ExitError {
+	if code, _, errOut := run(t, "doctor", "here", "there", "--fail-on=low"); code != ExitError {
 		t.Errorf("--fail-on=low with low findings: exit = %d, want %d (stderr: %s)", code, ExitError, errOut)
 	}
 	// A threshold nothing reaches must not fail the command.
-	if code, _, errOut := run(t, "doctor", "31921289286", "--fail-on=high"); code != ExitOK {
+	if code, _, errOut := run(t, "doctor", "here", "there", "--fail-on=high"); code != ExitOK {
 		t.Errorf("--fail-on=high with only low findings: exit = %d, want %d (stderr: %s)", code, ExitOK, errOut)
 	}
 
 	// The report still has to be produced: the exit code is a signal about the
 	// diagnosis, not a replacement for it.
-	code, stdout, errOut := run(t, "doctor", "31921289286", "--fail-on=low")
+	code, stdout, errOut := run(t, "doctor", "here", "there", "--fail-on=low")
 	if code != ExitError {
 		t.Fatalf("exit = %d, want %d", code, ExitError)
 	}
@@ -273,6 +288,19 @@ func TestDoctorFailOn(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "--fail-on threshold") {
 		t.Errorf("stderr should say why the exit code is non-zero, got: %s", errOut)
+	}
+}
+
+// writeSnapshotFile stores a snapshot whose only observation is a platform, so
+// a test can state exactly which findings it expects.
+func writeSnapshotFile(t *testing.T, name string, system *snapshot.System) {
+	t.Helper()
+	snap := snapshot.New(name, time.Time{})
+	snap.Source = &snapshot.Source{Kind: snapshot.SourceLocal}
+	snap.System = system
+	snap.Normalize()
+	if err := snapshot.NewStore("").Save(snap); err != nil {
+		t.Fatalf("save snapshot %s: %v", name, err)
 	}
 }
 

@@ -43,10 +43,18 @@ func AIRequestText(w io.Writer, in analysis.Input, prompt string) error {
 }
 
 type aiRequestDoc struct {
-	SchemaVersion int            `json:"schema_version"`
-	Executed      bool           `json:"executed"`
-	Prompt        string         `json:"prompt"`
-	Input         analysis.Input `json:"input"`
+	SchemaVersion int  `json:"schema_version"`
+	Executed      bool `json:"executed"`
+	// Agent and Command are absent until something actually ran, so a consumer
+	// that finds them knows a program was invoked, not merely offered.
+	Agent   string   `json:"agent,omitempty"`
+	Command []string `json:"command,omitempty"`
+	Prompt  string   `json:"prompt"`
+	// Analysis is the agent's answer, verbatim. It is deliberately a plain
+	// string: Nyrvo does not parse, score, or restructure model output, and a
+	// consumer must not be able to mistake it for a Nyrvo finding.
+	Analysis string         `json:"analysis,omitempty"`
+	Input    analysis.Input `json:"input"`
 }
 
 // AIRequestJSON makes the lack of model execution explicit for consumers that
@@ -58,4 +66,39 @@ func AIRequestJSON(w io.Writer, in analysis.Input, prompt string) error {
 		Prompt:        prompt,
 		Input:         in,
 	})
+}
+
+// AIResultJSON is the same document after an agent ran, so a consumer reads one
+// shape either way and decides on `executed` rather than on which fields exist.
+func AIResultJSON(w io.Writer, in analysis.Input, prompt, agentName string, command []string, result string) error {
+	return JSON(w, aiRequestDoc{
+		SchemaVersion: in.SchemaVersion,
+		Executed:      true,
+		Agent:         agentName,
+		Command:       elidePrompt(command, prompt),
+		Prompt:        prompt,
+		Analysis:      result,
+		Input:         in,
+	})
+}
+
+// promptArgument stands in for the request wherever the command line is shown.
+const promptArgument = "<request>"
+
+// elidePrompt replaces the request argument with a placeholder. The command is
+// recorded so a reader can see exactly what ran; repeating a multi-kilobyte
+// prompt inside it, next to the copy the document already carries, only makes
+// the document harder to read for no information gained.
+func elidePrompt(command []string, prompt string) []string {
+	if len(command) == 0 {
+		return nil
+	}
+	out := make([]string, len(command))
+	copy(out, command)
+	for i, arg := range out {
+		if arg == prompt {
+			out[i] = promptArgument
+		}
+	}
+	return out
 }

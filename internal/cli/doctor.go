@@ -8,9 +8,11 @@ import (
 	"io"
 	"strings"
 
+	"github.com/nyrvo-dev/nyrvo/internal/analysis"
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/ci/githubactions"
 	"github.com/nyrvo-dev/nyrvo/internal/diagnostic"
+	"github.com/nyrvo-dev/nyrvo/internal/diff"
 	"github.com/nyrvo-dev/nyrvo/internal/finding"
 	"github.com/nyrvo-dev/nyrvo/internal/output"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
@@ -27,6 +29,10 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	asJSON := fs.Bool("json", false, "write the diagnosis as JSON")
+	// --ai is opt-in and does not become a default: `nyrvo doctor` must never
+	// hand a user's environment to anything, and a flag is the smallest thing
+	// that makes the choice visible in the command the user typed.
+	withAI := fs.Bool("ai", false, "also print an analysis request to hand to your own AI agent")
 	// failOn is the only flag in Nyrvo that takes a value, so it must be
 	// written --fail-on=high: splitFlags separates flags from operands on the
 	// assumption that every flag is boolean. Writing them apart fails loudly
@@ -91,11 +97,12 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 		return usageErr("doctor takes a run id or run URL, two snapshot names, or nothing to diagnose %s against %s", defaultDoctorA, defaultDoctorB)
 	}
 
-	// The diff is computed and discarded here: doctor reports conclusions, and
-	// a user who wants the underlying evidence runs `nyrvo diff`. Keeping the
-	// two commands separate is what lets someone who disagrees with a rule
-	// still trust the comparison beneath it.
-	_, findings := diagnostic.Analyze(snapA, snapB)
+	// The diff is not printed here: doctor reports conclusions, and a user who
+	// wants the underlying evidence runs `nyrvo diff`. Keeping the two commands
+	// separate is what lets someone who disagrees with a rule still trust the
+	// comparison beneath it. It is still needed as the evidence an agent reads
+	// under --ai, which is why it is kept rather than discarded.
+	differences, findings := diagnostic.Analyze(snapA, snapB)
 
 	// A snapshot's own notes — the run's conclusion, the step that failed, what
 	// Nyrvo could not model — answer "why did this fail?" in a way no
@@ -103,15 +110,45 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	// two low-severity platform differences and never mention the failure.
 	context := evidenceContext(snapA, snapB)
 
-	if *asJSON {
-		err = output.DoctorJSON(stdout, a, b, findings, context...)
-	} else {
-		err = output.DoctorText(stdout, a, b, findings, context...)
-	}
-	if err != nil {
+	if err := writeDiagnosis(stdout, a, b, snapA, snapB, differences, findings, context, *asJSON, *withAI); err != nil {
 		return err
 	}
 	return failOnThreshold(stderr, findings, threshold)
+}
+
+// writeDiagnosis renders the report the user asked for.
+//
+// Under --json the analysis request replaces the diagnosis document rather than
+// following it: two JSON documents on one stream is not something a consumer can
+// pipe into a parser, and the request already carries the findings the
+// diagnosis document would have repeated.
+func writeDiagnosis(
+	stdout io.Writer,
+	a, b string,
+	snapA, snapB *snapshot.Snapshot,
+	differences *diff.Result,
+	findings []finding.Finding,
+	context []string,
+	asJSON, withAI bool,
+) error {
+	if withAI {
+		in := analysis.Build(snapA, snapB, differences, findings, context)
+		prompt := analysis.Prompt(in)
+		if asJSON {
+			return output.AIRequestJSON(stdout, in, prompt)
+		}
+		// The deterministic report is printed first and in full. What Nyrvo
+		// established on its own is the part that does not depend on a model,
+		// and it should be readable by someone who never pastes the request.
+		if err := output.DoctorText(stdout, a, b, findings, context...); err != nil {
+			return err
+		}
+		return output.AIRequestText(stdout, in, prompt)
+	}
+	if asJSON {
+		return output.DoctorJSON(stdout, a, b, findings, context...)
+	}
+	return output.DoctorText(stdout, a, b, findings, context...)
 }
 
 // severityRank orders severities for the --fail-on threshold. It is separate

@@ -50,6 +50,7 @@ Usage:
   nyrvo doctor <run> [--json]      import a run and diagnose it in one step
   nyrvo doctor <a> <b> [--json]    diagnose two captured environments
                                    add --fail-on=high to exit non-zero on findings
+                                   add --ai to print a request for your own agent
   nyrvo list                        list captured environments
   nyrvo version                     print version information
 

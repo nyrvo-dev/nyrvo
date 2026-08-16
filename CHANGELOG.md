@@ -11,7 +11,10 @@ not.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `SECURITY.md`: how to report a vulnerability privately, what Nyrvo already
+  refuses to do, and what is deliberately not a vulnerability.
 
 ## [0.1.0] — 2026-08-16
 

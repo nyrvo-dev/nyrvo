@@ -322,6 +322,9 @@ Nyrvo will not recreate it.
 
 ## Security
 
+The full policy, including how to report a vulnerability privately, is in
+[SECURITY.md](SECURITY.md).
+
 Nyrvo **never stores environment variable values** — only their names.
 Presence is enough to detect drift ("REDIS_URL is missing in CI"), and never
 recording values means credentials never end up in a file you share in a bug

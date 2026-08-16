@@ -33,6 +33,8 @@ const (
 	ComponentGit         = "git"
 	ComponentRuntime     = "runtime"
 	ComponentEnvironment = "environment"
+	// ComponentDocker groups the container tooling differences.
+	ComponentDocker = "docker"
 )
 
 // componentOrder fixes the report order: the broadest facts about the machine
@@ -41,7 +43,8 @@ var componentOrder = map[string]int{
 	ComponentSystem:      0,
 	ComponentGit:         1,
 	ComponentRuntime:     2,
-	ComponentEnvironment: 3,
+	ComponentDocker:      3,
+	ComponentEnvironment: 4,
 }
 
 // Difference is one semantic drift between two environments.
@@ -97,6 +100,7 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 	compareSection(res, ComponentSystem, systemValues(a), systemValues(b), report{a: true, b: true})
 	compareSection(res, ComponentGit, gitValues(a), gitValues(b), report{a: true, b: true})
 	compareSection(res, ComponentRuntime, runtimeValues(a), runtimeValues(b), report{a: true, b: true})
+	compareSection(res, ComponentDocker, dockerValues(a), dockerValues(b), report{a: true, b: true})
 	// An environment list that is only partial (a CI workflow states the
 	// variables it sets, not the ones the runner adds) cannot testify to
 	// absence, so absences the other side could not have reported are not
@@ -247,6 +251,34 @@ func runtimeValues(s *snapshot.Snapshot) map[string]string {
 	v := make(map[string]string, len(s.Runtimes))
 	for _, r := range s.Runtimes {
 		v[r.Name] = r.Version
+	}
+	return v
+}
+
+// dockerValues describes the container tooling. The daemon state is compared
+// because "installed but not running" is exactly the difference that explains a
+// compose-backed suite passing in CI and failing on a laptop.
+//
+// Requirements are deliberately absent from every comparison: both sides
+// normally read the same repository, and a CI snapshot cannot read it at all,
+// so diffing them would manufacture drift out of provenance. They exist to let
+// a rule call a version wrong, not to be compared.
+func dockerValues(s *snapshot.Snapshot) map[string]string {
+	if s == nil || s.Docker == nil {
+		return nil
+	}
+	v := map[string]string{"daemon_running": strconv.FormatBool(s.Docker.DaemonRunning)}
+	// Each version is only compared when both sides observed one: an absent
+	// engine version on a machine with a stopped daemon is already reported by
+	// daemon_running, and would otherwise be reported twice.
+	if s.Docker.ClientVersion != "" {
+		v["client_version"] = s.Docker.ClientVersion
+	}
+	if s.Docker.ServerVersion != "" {
+		v["server_version"] = s.Docker.ServerVersion
+	}
+	if s.Docker.ComposeVersion != "" {
+		v["compose_version"] = s.Docker.ComposeVersion
 	}
 	return v
 }

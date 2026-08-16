@@ -36,11 +36,18 @@ type Snapshot struct {
 	// kind of thing with very different confidence, and a reader must be able
 	// to tell them apart. It is never compared: provenance always differs
 	// between the two environments being diffed, which is the point.
-	Source      *Source      `json:"source,omitempty"`
-	System      *System      `json:"system,omitempty"`
-	Git         *Git         `json:"git,omitempty"`
-	Runtimes    []Runtime    `json:"runtimes,omitempty"`
-	Environment *Environment `json:"environment,omitempty"`
+	Source *Source `json:"source,omitempty"`
+	System *System `json:"system,omitempty"`
+	Docker *Docker `json:"docker,omitempty"`
+	// Requirements are what the checked-out project says it needs, as opposed
+	// to what this machine happens to provide. They are never compared between
+	// environments — both sides usually read the same repository, and a CI
+	// snapshot cannot read it at all — but they are what lets a rule say a
+	// version is wrong rather than merely different.
+	Requirements []Requirement `json:"requirements,omitempty"`
+	Git          *Git          `json:"git,omitempty"`
+	Runtimes     []Runtime     `json:"runtimes,omitempty"`
+	Environment  *Environment  `json:"environment,omitempty"`
 }
 
 // Source kinds. They are stable identifiers: output and future diagnostic
@@ -88,6 +95,35 @@ type Git struct {
 	// Dirty reports uncommitted changes in the working tree. A dirty
 	// environment means its SHA does not fully describe the code that ran.
 	Dirty bool `json:"dirty"`
+}
+
+// Docker describes the container tooling available here.
+//
+// The section is absent when Docker is not installed. It is present with
+// DaemonRunning false when the CLI exists but the daemon does not answer —
+// which is a different fact, and a common reason a compose-backed test suite
+// passes in CI and not on a laptop.
+type Docker struct {
+	// ClientVersion is known even when the daemon is down; ServerVersion is the
+	// engine's own version and is only knowable when it answers.
+	ClientVersion  string `json:"client_version,omitempty"`
+	ServerVersion  string `json:"server_version,omitempty"`
+	DaemonRunning  bool   `json:"daemon_running"`
+	ComposeVersion string `json:"compose_version,omitempty"`
+}
+
+// Requirement is a version the project declares it needs.
+type Requirement struct {
+	// Runtime matches the runtime naming used everywhere else ("go", "node",
+	// "python"), so a requirement can be matched against what was observed.
+	Runtime string `json:"runtime"`
+	// Constraint is the declaration verbatim (">=24", "1.25", "^20"). It is
+	// kept as written because the file is the evidence; interpreting it is the
+	// job of whatever evaluates it.
+	Constraint string `json:"constraint"`
+	// Source names the file and field it came from, so a finding can point at
+	// the line to edit.
+	Source string `json:"source"`
 }
 
 // Runtime is one detected language runtime.
@@ -146,6 +182,12 @@ func (s *Snapshot) Normalize() {
 	}
 	s.CreatedAt = s.CreatedAt.UTC()
 	sort.Slice(s.Runtimes, func(i, j int) bool { return s.Runtimes[i].Name < s.Runtimes[j].Name })
+	sort.Slice(s.Requirements, func(i, j int) bool {
+		if s.Requirements[i].Runtime != s.Requirements[j].Runtime {
+			return s.Requirements[i].Runtime < s.Requirements[j].Runtime
+		}
+		return s.Requirements[i].Source < s.Requirements[j].Source
+	})
 	if s.Environment != nil {
 		sort.Strings(s.Environment.Names)
 	}

@@ -30,11 +30,39 @@ type Snapshot struct {
 	// CreatedAt records when the capture ran. It is deliberately excluded from
 	// semantic comparison: two captures of an unchanged machine must not drift
 	// merely because time passed.
-	CreatedAt   time.Time    `json:"created_at"`
+	CreatedAt time.Time `json:"created_at"`
+	// Source records where the observations came from. A snapshot captured on
+	// this machine and one derived from a CI workflow file describe the same
+	// kind of thing with very different confidence, and a reader must be able
+	// to tell them apart. It is never compared: provenance always differs
+	// between the two environments being diffed, which is the point.
+	Source      *Source      `json:"source,omitempty"`
 	System      *System      `json:"system,omitempty"`
 	Git         *Git         `json:"git,omitempty"`
 	Runtimes    []Runtime    `json:"runtimes,omitempty"`
 	Environment *Environment `json:"environment,omitempty"`
+}
+
+// Source kinds. They are stable identifiers: output and future diagnostic
+// rules match on them.
+const (
+	// SourceLocal marks a snapshot observed by running on the machine itself.
+	SourceLocal = "local"
+	// SourceGitHubActions marks a snapshot derived from a workflow file. It
+	// describes the environment a job is *expected* to run in, which is not
+	// the same as having watched it run.
+	SourceGitHubActions = "github-actions"
+)
+
+// Source describes where a snapshot's observations came from.
+type Source struct {
+	Kind string `json:"kind"`
+	// Ref locates the origin within its kind: a workflow file and job for
+	// github-actions, empty for a local capture.
+	Ref string `json:"ref,omitempty"`
+	// Notes lists what the source declared but Nyrvo does not model, so a
+	// snapshot never implies coverage it does not have.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // System describes the host operating system and CPU architecture.

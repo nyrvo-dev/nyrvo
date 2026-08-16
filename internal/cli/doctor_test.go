@@ -237,3 +237,61 @@ func TestDoctorRunPlusJobExplainsTheTwoStepRoute(t *testing.T) {
 		t.Errorf("a run URL must not be reported as a snapshot name: %s", errOut)
 	}
 }
+
+// --fail-on is how a CI job opts into a non-zero exit. Without it a diagnosis
+// never changes the exit code, because drift is an answer and a low-severity
+// note should not turn a pipeline red by default.
+func TestDoctorFailOn(t *testing.T) {
+	stub := &ciExecStub{
+		runDoc:  readFixture(t, "run-failed.json"),
+		jobsDoc: readFixture(t, "jobs-failed.json"),
+		logDoc:  readLogFixture(t, "log-failure.txt"),
+	}
+	stubCIClient(t, stub)
+	t.Chdir(t.TempDir())
+
+	// This diagnosis yields low-severity findings only.
+	if code, _, _ := run(t, "doctor", "31921289286"); code != ExitOK {
+		t.Fatalf("without --fail-on: exit = %d, want %d", code, ExitOK)
+	}
+	if code, _, errOut := run(t, "doctor", "31921289286", "--fail-on=low"); code != ExitError {
+		t.Errorf("--fail-on=low with low findings: exit = %d, want %d (stderr: %s)", code, ExitError, errOut)
+	}
+	// A threshold nothing reaches must not fail the command.
+	if code, _, errOut := run(t, "doctor", "31921289286", "--fail-on=high"); code != ExitOK {
+		t.Errorf("--fail-on=high with only low findings: exit = %d, want %d (stderr: %s)", code, ExitOK, errOut)
+	}
+
+	// The report still has to be produced: the exit code is a signal about the
+	// diagnosis, not a replacement for it.
+	code, stdout, errOut := run(t, "doctor", "31921289286", "--fail-on=low")
+	if code != ExitError {
+		t.Fatalf("exit = %d, want %d", code, ExitError)
+	}
+	if !strings.Contains(stdout, "NYRVO DOCTOR") {
+		t.Error("the diagnosis must still be written when the threshold trips")
+	}
+	if !strings.Contains(errOut, "--fail-on threshold") {
+		t.Errorf("stderr should say why the exit code is non-zero, got: %s", errOut)
+	}
+}
+
+func TestDoctorFailOnUsage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	mustCapture(t, "local")
+	mustCapture(t, "other")
+
+	// An unknown severity is a mistyped command, not a diagnosis.
+	if code, _, _ := run(t, "doctor", "local", "other", "--fail-on=critical"); code != ExitUsage {
+		t.Error("--fail-on=critical should be a usage error")
+	}
+	// Nyrvo's flag splitting assumes boolean flags, so the separated form must
+	// fail loudly and say how to write it instead of eating the value.
+	code, _, errOut := run(t, "doctor", "local", "other", "--fail-on", "high")
+	if code != ExitUsage {
+		t.Fatalf("separated --fail-on: exit = %d, want %d", code, ExitUsage)
+	}
+	if !strings.Contains(errOut, "--fail-on=high") {
+		t.Errorf("the error should show the --flag=value form, got: %s", errOut)
+	}
+}

@@ -6,10 +6,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/ci/githubactions"
 	"github.com/nyrvo-dev/nyrvo/internal/diagnostic"
+	"github.com/nyrvo-dev/nyrvo/internal/finding"
 	"github.com/nyrvo-dev/nyrvo/internal/output"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
@@ -25,14 +27,25 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	asJSON := fs.Bool("json", false, "write the diagnosis as JSON")
+	// failOn is the only flag in Nyrvo that takes a value, so it must be
+	// written --fail-on=high: splitFlags separates flags from operands on the
+	// assumption that every flag is boolean. Writing them apart fails loudly
+	// here rather than silently treating the value as a snapshot name.
+	failOn := fs.String("fail-on", "", "exit non-zero when a finding of this severity or worse exists (high, medium, low)")
 	flags, operands := splitFlags(args)
 	if err := fs.Parse(flags); err != nil {
+		if strings.Contains(err.Error(), "needs an argument") {
+			return usageErr("doctor: %v (write it as --fail-on=high)", err)
+		}
 		return usageErr("doctor: %v", err)
+	}
+	threshold, err := parseFailOn(*failOn)
+	if err != nil {
+		return err
 	}
 
 	a, b := defaultDoctorA, defaultDoctorB
 	var snapA, snapB *snapshot.Snapshot
-	var err error
 
 	switch len(operands) {
 	case 0:
@@ -91,10 +104,70 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) err
 	context := evidenceContext(snapA, snapB)
 
 	if *asJSON {
-		return output.DoctorJSON(stdout, a, b, findings, context...)
+		err = output.DoctorJSON(stdout, a, b, findings, context...)
+	} else {
+		err = output.DoctorText(stdout, a, b, findings, context...)
 	}
-	return output.DoctorText(stdout, a, b, findings, context...)
+	if err != nil {
+		return err
+	}
+	return failOnThreshold(stderr, findings, threshold)
 }
+
+// severityRank orders severities for the --fail-on threshold. It is separate
+// from the renderer's ordering on purpose: this one has to answer "is this at
+// least as serious as X?", which is a comparison, not a sort key.
+var severityRank = map[finding.Severity]int{
+	finding.SeverityLow:    1,
+	finding.SeverityMedium: 2,
+	finding.SeverityHigh:   3,
+}
+
+// parseFailOn turns the flag value into a threshold. An empty value means the
+// exit code never depends on findings, which stays the default: a diagnosis is
+// an answer, and a CI job should opt in before a low-severity note can fail it.
+func parseFailOn(v string) (int, error) {
+	if v == "" {
+		return 0, nil
+	}
+	rank, ok := severityRank[finding.Severity(strings.ToLower(strings.TrimSpace(v)))]
+	if !ok {
+		return 0, usageErr("--fail-on=%s is not a severity; use high, medium or low", v)
+	}
+	return rank, nil
+}
+
+// failOnThreshold reports the opted-in failure, after the report has already
+// been written: the diagnosis is the point, and the exit code is a signal for
+// whatever ran the command.
+func failOnThreshold(stderr io.Writer, findings []finding.Finding, threshold int) error {
+	if threshold == 0 {
+		return nil
+	}
+	worst, count := 0, 0
+	for _, f := range findings {
+		if rank := severityRank[f.Severity]; rank >= threshold {
+			count++
+			if rank > worst {
+				worst = rank
+			}
+		}
+	}
+	if count == 0 {
+		return nil
+	}
+	name := map[int]string{1: "low", 2: "medium", 3: "high"}[worst]
+	_, err := fmt.Fprintf(stderr, "nyrvo: %d finding(s) at or above the --fail-on threshold; worst severity %s\n", count, name)
+	if err != nil {
+		return err
+	}
+	// errSilent exits non-zero without printing again: the reason is already on
+	// stderr in the caller's own words.
+	return errSilent
+}
+
+// errSilent asks the CLI for a non-zero exit with no further message.
+var errSilent = errors.New("")
 
 // evidenceContext collects what the snapshots reported about themselves.
 //

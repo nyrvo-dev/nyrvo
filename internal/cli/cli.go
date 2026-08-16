@@ -46,6 +46,7 @@ Usage:
   nyrvo doctor [--json]            diagnose local against ci
   nyrvo doctor <run> [--json]      import a run and diagnose it in one step
   nyrvo doctor <a> <b> [--json]    diagnose two captured environments
+                                   add --fail-on=high to exit non-zero on findings
   nyrvo list                        list captured environments
   nyrvo version                     print version information
 
@@ -89,6 +90,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	switch {
 	case err == nil:
 		return ExitOK
+	case errors.Is(err, errSilent):
+		// The command already explained itself; repeating it as "nyrvo: " would
+		// only add noise to an exit code the caller asked for.
+		return ExitError
 	case errors.Is(err, errUsage):
 		_, _ = fmt.Fprintf(stderr, "%v\n\n%s", err, usage)
 		return ExitUsage

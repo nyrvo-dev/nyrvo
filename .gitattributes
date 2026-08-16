@@ -1,0 +1,10 @@
+# Line endings are LF everywhere, including on a Windows checkout.
+#
+# This is not a style preference. Go source must use LF: gofmt reports a CRLF
+# file as unformatted, so a Windows runner with core.autocrlf=true — which is
+# the default for Git for Windows — fails the format check on every file in the
+# repository before a single test runs.
+#
+# The captured job logs under testdata are parsed line by line, and rewriting
+# their endings on checkout would change the evidence a test asserts against.
+* text=auto eol=lf

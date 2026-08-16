@@ -180,3 +180,47 @@ func TestRequirementsNeverCompared(t *testing.T) {
 		}
 	}
 }
+
+func TestGoDirectiveIsAFloorNotAPin(t *testing.T) {
+	// The go directive states the lowest version the module accepts. A newer
+	// toolchain satisfies it, and this project itself declares 1.25 while
+	// developing on 1.26 — reading it as a pin made Nyrvo convict its own
+	// repository.
+	req := snapshot.Requirement{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive", Minimum: true}
+	local := &snapshot.Snapshot{
+		Name:         "local",
+		Requirements: []snapshot.Requirement{req},
+		Runtimes:     []snapshot.Runtime{{Name: "go", Version: "1.26.6"}},
+	}
+	if got := requirementUnsatisfied(Input{A: local, B: &snapshot.Snapshot{Name: "ci"}}); len(got) != 0 {
+		t.Fatalf("a newer Go was reported as unsatisfying a minimum: %+v", got)
+	}
+
+	older := &snapshot.Snapshot{
+		Name:         "local",
+		Requirements: []snapshot.Requirement{req},
+		Runtimes:     []snapshot.Runtime{{Name: "go", Version: "1.24.0"}},
+	}
+	got := requirementUnsatisfied(Input{A: older, B: &snapshot.Snapshot{Name: "ci"}})
+	if len(got) != 1 {
+		t.Fatalf("an older Go was not reported: %+v", got)
+	}
+	// The report has to show the constraint as it is enforced, or a reader
+	// cannot tell why 1.24.0 fails "1.25" while 1.26.6 passes it.
+	if got[0].Expected != ">=1.25" {
+		t.Errorf("expected = %q, want %q", got[0].Expected, ">=1.25")
+	}
+}
+
+func TestAPinnedDeclarationStaysAPin(t *testing.T) {
+	// .nvmrc names the version to use, not a floor, and must keep convicting a
+	// machine running something else.
+	local := &snapshot.Snapshot{
+		Name:         "local",
+		Requirements: []snapshot.Requirement{{Runtime: "node", Constraint: "20", Source: ".nvmrc"}},
+		Runtimes:     []snapshot.Runtime{{Name: "node", Version: "22.1.0"}},
+	}
+	if got := requirementUnsatisfied(Input{A: local, B: &snapshot.Snapshot{Name: "ci"}}); len(got) != 1 {
+		t.Fatalf("a pinned declaration stopped being enforced: %+v", got)
+	}
+}

@@ -133,10 +133,16 @@ func packageJSONReqs(dir string) []snapshot.Requirement {
 	return reqs
 }
 
-// goModReqs reads the go directive, which pins the module's language version
-// (e.g. `go 1.25`). The toolchain directive is deliberately ignored: it names
-// the compiler Nyrvo would need, not the language level the project declares
-// it requires.
+// goModReqs reads the go directive (e.g. `go 1.25`).
+//
+// Since Go 1.21 the directive is the lowest version the module accepts, not a
+// pin: building with a newer toolchain satisfies it. It is recorded as a
+// minimum for that reason — read as a pin, every project developed on a Go
+// newer than the one it supports reports itself as broken, which is the normal
+// and intended arrangement.
+//
+// The toolchain directive is deliberately ignored: it names the compiler Nyrvo
+// would need, not the language level the project declares it requires.
 func goModReqs(dir string) []snapshot.Requirement {
 	body, ok := readSource(dir, "go.mod")
 	if !ok {
@@ -145,7 +151,12 @@ func goModReqs(dir string) []snapshot.Requirement {
 	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[0] == "go" {
-			return []snapshot.Requirement{{Runtime: "go", Constraint: fields[1], Source: "go.mod go directive"}}
+			return []snapshot.Requirement{{
+				Runtime:    "go",
+				Constraint: fields[1],
+				Source:     "go.mod go directive",
+				Minimum:    true,
+			}}
 		}
 	}
 	return nil

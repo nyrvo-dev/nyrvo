@@ -124,6 +124,16 @@ type Requirement struct {
 	// Source names the file and field it came from, so a finding can point at
 	// the line to edit.
 	Source string `json:"source"`
+	// Minimum marks a declaration that is a floor rather than a pin. The go
+	// directive in go.mod is the case that matters: since Go 1.21 it states the
+	// lowest version the module accepts, so a newer toolchain satisfies it.
+	// Reading it as a pin makes every project developed on a newer Go than it
+	// supports look broken.
+	//
+	// The constraint is still stored exactly as the file writes it. What this
+	// records is how the file means it, which only the collector that read it
+	// can know.
+	Minimum bool `json:"minimum,omitempty"`
 }
 
 // Runtime is one detected language runtime.

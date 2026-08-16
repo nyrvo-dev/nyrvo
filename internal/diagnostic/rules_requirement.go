@@ -58,7 +58,7 @@ func requirementUnsatisfied(in Input) []finding.Finding {
 				if rt.Version == "" {
 					continue
 				}
-				met, decided := requirementMet(req.Constraint, rt.Version, !Declared(side))
+				met, decided := requirementMet(effectiveConstraint(req), rt.Version, !Declared(side))
 				if !decided || met {
 					continue
 				}
@@ -149,28 +149,41 @@ func projectRequirements(in Input) []snapshot.Requirement {
 	return out
 }
 
+// effectiveConstraint turns a declaration into the constraint it actually
+// expresses. A minimum reads as a floor, so `go 1.25` in go.mod is ">=1.25" and
+// a machine on 1.26.6 satisfies it. Without this the rule convicts every
+// project developed on a Go newer than the one it supports — which is the
+// normal arrangement, and was true of this repository.
+func effectiveConstraint(req snapshot.Requirement) string {
+	if req.Minimum {
+		return ">=" + req.Constraint
+	}
+	return req.Constraint
+}
+
 func unsatisfiedFinding(in Input, side *snapshot.Snapshot, req snapshot.Requirement, version string) finding.Finding {
+	constraint := effectiveConstraint(req)
 	f := finding.Finding{
 		Rule:      finding.RuntimeRequirementUnsatisfied,
 		Severity:  finding.SeverityHigh,
 		Component: diff.ComponentRuntime,
 		Key:       req.Runtime,
-		Expected:  req.Constraint,
+		Expected:  constraint,
 		Actual:    version,
 		Description: fmt.Sprintf("%s requires %s %s, but %s has %s.",
-			req.Source, req.Runtime, req.Constraint, Name(side), version),
+			req.Source, req.Runtime, constraint, Name(side), version),
 	}
 
 	switch {
 	case Declared(side):
 		f.Recommendation = fmt.Sprintf("Change the %s version input in %s to one that satisfies %s.",
-			req.Runtime, declaredRef(in), req.Constraint)
+			req.Runtime, declaredRef(in), constraint)
 	case CIDerived(side):
 		f.Recommendation = fmt.Sprintf("Set up a %s version that satisfies %s in CI, or relax the constraint in %s.",
-			req.Runtime, req.Constraint, req.Source)
+			req.Runtime, constraint, req.Source)
 	default:
 		f.Recommendation = fmt.Sprintf("Install a %s version that satisfies %s, or relax the constraint in %s.",
-			req.Runtime, req.Constraint, req.Source)
+			req.Runtime, constraint, req.Source)
 	}
 	return f
 }

@@ -30,7 +30,14 @@ func collect(t *testing.T, dir string, existing ...snapshot.Requirement) (*snaps
 }
 
 func req(runtime, constraint, source string) snapshot.Requirement {
-	return snapshot.Requirement{Runtime: runtime, Constraint: constraint, Source: source}
+	return snapshot.Requirement{
+		Runtime:    runtime,
+		Constraint: constraint,
+		Source:     source,
+		// The go directive is the only declaration Nyrvo reads as a floor, so
+		// the helper mirrors that rather than making every case state it.
+		Minimum: source == "go.mod go directive",
+	}
 }
 
 func findReq(t *testing.T, reqs []snapshot.Requirement, runtime, source string) string {
@@ -336,5 +343,27 @@ func TestOversizedPackageJSONSkipped(t *testing.T) {
 	want := []snapshot.Requirement{req("go", "1.25", "go.mod go directive")}
 	if !reflect.DeepEqual(snap.Requirements, want) {
 		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)
+	}
+}
+
+func TestGoDirectiveIsRecordedAsAMinimum(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "go.mod", "module example.com/m\n\ngo 1.25\n")
+
+	snap, err := collect(t, dir)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(snap.Requirements) != 1 {
+		t.Fatalf("requirements = %v, want one", snap.Requirements)
+	}
+	// Since Go 1.21 the directive is the lowest version the module accepts.
+	// Recorded as a pin, it convicts every project built with a newer Go.
+	if !snap.Requirements[0].Minimum {
+		t.Error("the go directive was recorded as a pin, not a minimum")
+	}
+	// The constraint itself stays exactly as the file writes it.
+	if snap.Requirements[0].Constraint != "1.25" {
+		t.Errorf("constraint = %q, want the file's own text", snap.Requirements[0].Constraint)
 	}
 }

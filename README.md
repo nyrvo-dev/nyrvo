@@ -132,7 +132,10 @@ what the checked-out project declares it needs, and reports when it does not
 meet it — the only rule that can call an environment wrong rather than merely
 different. It understands comparators (`>=`, `>`, `<=`, `<`, `=`), caret and
 tilde ranges, wildcards (`"20.x"`), bare prefixes, and comma- or space-separated
-conjunctions with `||` alternatives. A constraint it cannot fully parse —
+conjunctions with `||` alternatives. It also knows which declarations are floors
+rather than pins: the `go` directive in go.mod states the lowest version the
+module accepts, so a project declaring `go 1.25` and built on 1.26.6 is correct,
+not broken. A constraint it cannot fully parse —
 `lts/iron`, `workspace:*`, a hyphen range — produces no finding rather than a
 guess.
 

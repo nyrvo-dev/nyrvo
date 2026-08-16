@@ -36,6 +36,13 @@ Conventional Commits, and every commit must build and test on its own. Squashing
 a broken intermediate state into a working one is fine; pushing a series where
 `git checkout <sha> && go test ./...` fails in the middle is not.
 
+## Releases
+
+A git tag is the release; see [docs/RELEASING.md](docs/RELEASING.md) for what
+the version number promises and how to cut one. User-visible changes belong in
+`CHANGELOG.md` under `[Unreleased]`, in the same pull request that makes them —
+a changelog written at release time is a changelog written from memory.
+
 ## Adding an AI agent adapter
 
 Nyrvo supports `claude`, `codex` and `opencode`. Adding another is deliberately a

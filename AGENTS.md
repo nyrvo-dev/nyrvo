@@ -39,6 +39,8 @@ Collector -> Snapshot -> Diff -> (later) Finding -> Doctor
 | `internal/collector/*` | one collector per observed area (system, git, runtime, env) |
 | `internal/capture` | runs collectors, tolerates unavailable ones, assembles the snapshot |
 | `internal/ci/githubactions` | parses workflow files and derives the environment a job declares |
+| `internal/finding` | what a diagnosis is: rule ids, severities, findings |
+| `internal/diagnostic` | deterministic rules that turn differences into findings |
 | `internal/diff` | semantic comparison of two snapshots |
 | `internal/output` | terminal and JSON rendering |
 | `internal/cli` | commands, flags, exit codes |
@@ -100,6 +102,21 @@ section never panics.
 
 Adding a field to the snapshot is a contract change: justify it, keep it
 optional, and update the diff and its tests in the same change.
+
+## Adding a diagnostic rule
+
+1. Pick or add a stable rule id in `internal/finding`. Ids appear in JSON and in
+   scripts; renaming one is a breaking change.
+2. Append a `Rule` to the right group in `internal/diagnostic/rules_*.go`.
+3. Drive it from `Input.Diff` where the diff already has the answer; reach into
+   the snapshots only for context the diff dropped (`Declared`, `Partial`,
+   dirtiness).
+4. Severity answers "how plausibly does this explain a failure?", not "how big
+   is this difference?" — see `docs/adr/0009`. Anything above `low` needs a
+   justification.
+5. Never fire on a correct configuration. A declared version is a prefix:
+   `go-version: "1.26"` is satisfied by `1.26.6`.
+6. Test the firing case, the non-firing case, and the nil/empty case.
 
 ## Security review triggers
 

@@ -62,6 +62,21 @@ listed under "not modelled" instead of being silently dropped, and a value it
 cannot know — `node-version: 20.x`, `runs-on: ${{ matrix.os }}` — is reported
 as unknown rather than guessed.
 
+Ask what the differences mean:
+
+```
+$ nyrvo doctor              # diagnoses local against ci
+$ nyrvo doctor local prod
+$ nyrvo doctor --json
+```
+
+`doctor` applies deterministic rules — no model, no network, no clock — and
+ranks findings by how plausibly they explain a failure rather than by how large
+the difference is. A version a workflow declares as a prefix (`go-version:
+"1.26"`) is satisfied by a machine running `1.26.6`, so a correct setup stays
+quiet. When nothing matches, Nyrvo says no rule matched; it does not claim the
+environments are equivalent.
+
 Other commands:
 
 ```

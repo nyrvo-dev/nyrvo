@@ -45,8 +45,18 @@ type Snapshot struct {
 	// snapshot cannot read it at all — but they are what lets a rule say a
 	// version is wrong rather than merely different.
 	Requirements []Requirement `json:"requirements,omitempty"`
-	Git          *Git          `json:"git,omitempty"`
-	Runtimes     []Runtime     `json:"runtimes,omitempty"`
+	// Services are the backing containers an environment has: what a CI job
+	// declares under `services:`, and what is actually running here.
+	//
+	// Like Requirements, they are never diffed. A laptop runs whatever its owner
+	// happens to have up, a CI job runs the two sidecars it asked for, and
+	// listing the difference between those two sets produces a page of drift
+	// that describes a desk rather than a defect. They exist so a rule can ask
+	// the one question worth asking: does this machine provide what the job
+	// declared it needs?
+	Services []Service `json:"services,omitempty"`
+	Git      *Git      `json:"git,omitempty"`
+	Runtimes []Runtime `json:"runtimes,omitempty"`
 	// PartialRuntimes marks a runtime list that is known to be incomplete, for
 	// the same reason Environment.Partial exists.
 	//
@@ -146,6 +156,29 @@ type Requirement struct {
 	Minimum bool `json:"minimum,omitempty"`
 }
 
+// Service is one backing container an environment provides or asks for.
+//
+// What is deliberately absent is as important as what is here. A container name
+// is not recorded: `docker ps` is a view of the whole machine rather than of one
+// project, so names would write the user's unrelated work — compose project
+// names, and through labels the absolute paths of their other repositories —
+// into a file people paste into bug reports. The image answers the only question
+// a rule asks, and answers it without that cost.
+type Service struct {
+	// Image is the reference as declared or as run ("postgres:16"). It is the
+	// identity: a job asks for an image, and a machine either runs one or does
+	// not.
+	Image string `json:"image"`
+	// ID is the key under a workflow's `services:`, which is also the hostname
+	// the job reaches it by. It is empty for an observed container, where the
+	// equivalent would be a name Nyrvo declines to record.
+	ID string `json:"id,omitempty"`
+	// Ports are the host ports an observed container publishes ("5432"). A
+	// workflow's services are reached by hostname on the container's own port,
+	// so a declared service usually publishes nothing and this stays empty.
+	Ports []string `json:"ports,omitempty"`
+}
+
 // Runtime is one detected language runtime.
 type Runtime struct {
 	// Name is a stable lowercase identifier ("go", "node", "python") used as
@@ -202,6 +235,12 @@ func (s *Snapshot) Normalize() {
 	}
 	s.CreatedAt = s.CreatedAt.UTC()
 	sort.Slice(s.Runtimes, func(i, j int) bool { return s.Runtimes[i].Name < s.Runtimes[j].Name })
+	sort.Slice(s.Services, func(i, j int) bool {
+		if s.Services[i].Image != s.Services[j].Image {
+			return s.Services[i].Image < s.Services[j].Image
+		}
+		return s.Services[i].ID < s.Services[j].ID
+	})
 	sort.Slice(s.Requirements, func(i, j int) bool {
 		if s.Requirements[i].Runtime != s.Requirements[j].Runtime {
 			return s.Requirements[i].Runtime < s.Requirements[j].Runtime

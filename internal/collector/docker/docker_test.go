@@ -25,6 +25,7 @@ const (
 	legacyClient  = "docker --version"
 	composeShort  = "docker compose version --short"
 	legacyCompose = "docker-compose --version"
+	psFormat      = "docker ps --format {{json .}}"
 )
 
 // fakeResult is one fake command invocation's answer.
@@ -69,6 +70,7 @@ func TestCollect(t *testing.T) {
 			stub: map[string]fakeResult{
 				clientFormat: {out: "29.4.0"},
 				serverFormat: {out: "29.4.0"},
+				psFormat:     {out: ""},
 				composeShort: {out: "v5.1.2"},
 			},
 			want: &snapshot.Docker{
@@ -105,6 +107,7 @@ func TestCollect(t *testing.T) {
 			stub: map[string]fakeResult{
 				clientFormat:  {out: "29.4.0"},
 				serverFormat:  {out: "29.4.0"},
+				psFormat:      {out: ""},
 				composeShort:  {err: fmt.Errorf("docker: unknown command")},
 				legacyCompose: {err: fmt.Errorf("docker-compose not found: %w", collector.ErrUnavailable)},
 			},
@@ -120,6 +123,7 @@ func TestCollect(t *testing.T) {
 				clientFormat: {err: fmt.Errorf("docker version: boom")},
 				legacyClient: {out: "Docker version 29.4.0, build 9d7ad9f"},
 				serverFormat: {out: "29.4.0"},
+				psFormat:     {out: ""},
 				composeShort: {out: "5.1.2"},
 			},
 			want: &snapshot.Docker{
@@ -134,6 +138,7 @@ func TestCollect(t *testing.T) {
 			stub: map[string]fakeResult{
 				clientFormat:  {out: "29.4.0"},
 				serverFormat:  {out: "29.4.0"},
+				psFormat:      {out: ""},
 				composeShort:  {err: fmt.Errorf("docker: unknown command")},
 				legacyCompose: {out: "Docker Compose version v5.1.2"},
 			},
@@ -152,6 +157,7 @@ func TestCollect(t *testing.T) {
 				clientFormat: {out: "garbage"},
 				legacyClient: {out: "garbage"},
 				serverFormat: {out: "garbage"},
+				psFormat:     {out: ""},
 				composeShort: {out: "garbage"},
 			},
 			want: &snapshot.Docker{},
@@ -250,6 +256,7 @@ func TestCollectLeavesOtherSectionsUntouched(t *testing.T) {
 	d := &Docker{run: fakeRun(map[string]fakeResult{
 		clientFormat: {out: "29.4.0"},
 		serverFormat: {out: "29.4.0"},
+		psFormat:     {out: ""},
 		composeShort: {out: "5.1.2"},
 	})}
 	snap := snapshot.New("test", time.Now())
@@ -270,5 +277,38 @@ func TestCollectLeavesOtherSectionsUntouched(t *testing.T) {
 	}
 	if !reflect.DeepEqual(*snap.Environment, envBefore) {
 		t.Errorf("snap.Environment changed: got %+v, want %+v", *snap.Environment, envBefore)
+	}
+}
+
+func TestCollectRecordsRunningServicesOnlyWhenTheDaemonAnswers(t *testing.T) {
+	up := fakeRun(map[string]fakeResult{
+		clientFormat: {out: "29.4.0"},
+		serverFormat: {out: "29.4.0"},
+		composeShort: {out: "5.1.2"},
+		psFormat:     {out: `{"Image":"postgres:16","Ports":"0.0.0.0:5432->5432/tcp"}`},
+	})
+	snap := snapshot.New("local", time.Time{})
+	if err := (&Docker{run: up}).Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	want := []snapshot.Service{{Image: "postgres:16", Ports: []string{"5432"}}}
+	if !reflect.DeepEqual(snap.Services, want) {
+		t.Fatalf("services = %+v, want %+v", snap.Services, want)
+	}
+
+	// With the daemon down there is nothing to ask. Reporting no services then
+	// would be answering "none" to a question that was never put, and a rule
+	// downstream would read it as evidence the machine runs nothing.
+	down := fakeRun(map[string]fakeResult{
+		clientFormat: {out: "29.4.0"},
+		serverFormat: {err: fmt.Errorf("Cannot connect to the Docker daemon")},
+		composeShort: {out: "5.1.2"},
+	})
+	snap = snapshot.New("local", time.Time{})
+	if err := (&Docker{run: down}).Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(snap.Services) != 0 {
+		t.Fatalf("services = %+v, want none observed", snap.Services)
 	}
 }

@@ -11,6 +11,17 @@ import (
 )
 
 // Services returns the images running on this machine, deduplicated.
+//
+// Only the image and the published host ports are read, and that is the point
+// of the function rather than an omission in it. `docker ps` reports the whole
+// machine, not this project: it also prints container names carrying compose
+// project names, and labels carrying the absolute paths of the user's unrelated
+// repositories. A snapshot is a file people paste into bug reports, and the
+// image alone answers the only question a rule asks of it.
+//
+// A container that publishes nothing is still recorded. A workflow's services
+// publish no ports either — the job reaches them by hostname — so absence of
+// ports is normal and says nothing about whether the service is there.
 func Services(ctx context.Context, run runFunc) ([]snapshot.Service, error) {
 	out, err := run(ctx, "docker", "ps", "--format", "{{json .}}")
 	if err != nil {
@@ -50,7 +61,9 @@ func Services(ctx context.Context, run runFunc) ([]snapshot.Service, error) {
 
 	services := make([]snapshot.Service, 0, len(portsByImage))
 	for image, portSet := range portsByImage {
-		ports := make([]string, 0, len(portSet))
+		// nil rather than an empty slice: the field is omitempty, so a snapshot
+		// written and read back would otherwise not equal the one in memory.
+		var ports []string
 		for port := range portSet {
 			ports = append(ports, port)
 		}

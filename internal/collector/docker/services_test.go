@@ -72,7 +72,9 @@ func TestServicesDeduplicatesIPv4AndIPv6Port(t *testing.T) {
 
 func TestServicesDropsExposedOnlyPort(t *testing.T) {
 	out := `{"Image":"mail:latest","Ports":"1110/tcp"}`
-	want := []snapshot.Service{{Image: "mail:latest", Ports: []string{}}}
+	// nil, not an empty slice: the field is omitempty, so a snapshot written and
+	// read back would otherwise not equal the one in memory.
+	want := []snapshot.Service{{Image: "mail:latest"}}
 
 	got, err := Services(context.Background(), servicesFakeRun(t, out, nil))
 	if err != nil {

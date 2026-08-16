@@ -83,6 +83,19 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		return cerr
 	}
 
+	// Running containers are only askable of a daemon that answers. Listing them
+	// is not attempted otherwise, so a machine with the CLI and no daemon
+	// reports no services because none could be observed — never because the
+	// question was answered "none".
+	if docker.DaemonRunning {
+		services, serr := Services(ctx, run)
+		if serr == nil {
+			snap.Services = append(snap.Services, services...)
+		} else if isContextErr(serr) {
+			return serr
+		}
+	}
+
 	snap.Docker = docker
 	return nil
 }

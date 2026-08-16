@@ -14,8 +14,10 @@ import (
 
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/collector"
+	"github.com/nyrvo-dev/nyrvo/internal/collector/docker"
 	"github.com/nyrvo-dev/nyrvo/internal/collector/env"
 	"github.com/nyrvo-dev/nyrvo/internal/collector/git"
+	"github.com/nyrvo-dev/nyrvo/internal/collector/requirements"
 	"github.com/nyrvo-dev/nyrvo/internal/collector/runtime"
 	"github.com/nyrvo-dev/nyrvo/internal/collector/system"
 	"github.com/nyrvo-dev/nyrvo/internal/diff"
@@ -149,6 +151,10 @@ func defaultCollectors() []collector.Collector {
 		runtime.Go(),
 		runtime.Node(),
 		runtime.Python(),
+		&docker.Docker{},
+		// Requirements reads the checked-out project, not the machine, so it
+		// runs from the working directory like the git collector does.
+		requirements.Requirements{},
 		env.Env{},
 	}
 }

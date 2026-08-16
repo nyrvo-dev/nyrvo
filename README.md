@@ -47,6 +47,21 @@ $ nyrvo capture local --json
 $ nyrvo diff local ci --json
 ```
 
+Compare this machine against what CI declares:
+
+```
+$ nyrvo ci inspect            # what each workflow job says it needs
+$ nyrvo ci capture lint       # save that job's declared environment as "ci"
+$ nyrvo capture local
+$ nyrvo diff local ci
+```
+
+Nyrvo reads `.github/workflows/*.yml`; it never runs a workflow, resolves an
+action, or calls the GitHub API. Anything it recognizes but does not model is
+listed under "not modelled" instead of being silently dropped, and a value it
+cannot know — `node-version: 20.x`, `runs-on: ${{ matrix.os }}` — is reported
+as unknown rather than guessed.
+
 Other commands:
 
 ```
@@ -60,6 +75,8 @@ $ nyrvo version
 - Git commit SHA, branch, and whether the working tree is dirty
 - Go, Node.js, and Python versions (including install paths)
 - Environment variable **names**
+- From CI: the runner platform, setup-action runtime versions, declared
+  environment variable names, and service containers a job asks for
 
 ## Snapshots
 

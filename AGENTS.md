@@ -38,6 +38,7 @@ Collector -> Snapshot -> Diff -> (later) Finding -> Doctor
 | `internal/collector` | `Collector` interface, `ErrUnavailable`, the external-command helper |
 | `internal/collector/*` | one collector per observed area (system, git, runtime, env) |
 | `internal/capture` | runs collectors, tolerates unavailable ones, assembles the snapshot |
+| `internal/ci/githubactions` | parses workflow files and derives the environment a job declares |
 | `internal/diff` | semantic comparison of two snapshots |
 | `internal/output` | terminal and JSON rendering |
 | `internal/cli` | commands, flags, exit codes |
@@ -56,10 +57,15 @@ Domain packages never print. Rendering happens only in `internal/output`.
 4. **Snapshots are deterministic.** Two captures of an unchanged machine must
    serialize to identical bytes. Sort collections; never let timestamps or
    collector ordering create drift.
-5. **Deterministic behavior stays independent of AI.** No LLM, network call, or
+5. **Never claim knowledge a source does not have.** CI configuration is
+   parsed, never executed: an expression or version range is reported as
+   unknown, not guessed. An incomplete observation (`Environment.Partial`)
+   cannot testify to absence, and any narrowing of a comparison must be
+   visible in the output. See `docs/adr/0006` and `docs/adr/0008`.
+6. **Deterministic behavior stays independent of AI.** No LLM, network call, or
    agent invocation may be part of `capture`, `diff`, or a future `doctor`
    without an explicit `--ai` opt-in.
-6. **Shared contracts change deliberately.** CLI commands, flags, exit codes,
+7. **Shared contracts change deliberately.** CLI commands, flags, exit codes,
    JSON output, and the snapshot schema are public once released. Changing the
    snapshot's meaning requires bumping `snapshot.SchemaVersion` and an ADR.
 

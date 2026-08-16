@@ -40,6 +40,8 @@ const usage = `nyrvo - see why an environment behaves differently
 Usage:
   nyrvo capture <name> [--json]     capture this environment as <name>
   nyrvo diff <a> <b> [--json]       compare two captured environments
+  nyrvo ci inspect [--json]         show the environments CI declares
+  nyrvo ci capture <job>            save a CI job's declared environment as "ci"
   nyrvo list                        list captured environments
   nyrvo version                     print version information
 
@@ -64,6 +66,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		err = runCapture(ctx, args[1:], stdout, stderr)
 	case "diff":
 		err = runDiff(args[1:], stdout, stderr)
+	case "ci":
+		err = runCI(args[1:], stdout)
 	case "list":
 		err = runList(args[1:], stdout, stderr)
 	case "version":

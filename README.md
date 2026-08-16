@@ -8,9 +8,9 @@ application behaves differently across local, CI, staging, and production.
 Early development. The commands listed under [Usage](#usage) are what works
 today: capture, diff, reading CI configuration, importing a run that happened,
 and deterministic diagnosis. `nyrvo ci replay` prints what a job does; it never
-runs it, and `nyrvo doctor --ai` prints a request for your own agent without
-calling one. Not yet available: database collectors, executing anything on your
-behalf, and adapters that run an installed agent for you.
+runs it, and `nyrvo doctor --ai` prints a request for your own agent while
+`--agent=` hands it to an agent CLI you already installed. Not yet available:
+database collectors, and executing anything else on your behalf.
 
 ## Why
 
@@ -175,10 +175,38 @@ one; on top of that the home directory prefix of a runtime path becomes `~`, and
 the environment variable names are reduced to the ones a difference or a finding
 actually refers to — on a laptop that is typically one name out of seventy.
 
-`--ai --json` prints the request as a single document with `"executed": false`,
-replacing the diagnosis document rather than following it: two JSON documents on
-one stream is not something a consumer can parse, and the request already
-carries the findings.
+If you would rather Nyrvo hand the request over for you, name an agent CLI you
+already have installed:
+
+```
+$ nyrvo doctor --agent=claude
+$ nyrvo doctor --agent=codex
+$ nyrvo doctor --agent=opencode
+```
+
+Nyrvo shells out to your own tool, authenticated on your own account — it owns
+no API keys and picks no vendor. Before anything runs it states which agent it
+will invoke, what the request contains, and the exact command, and it does not
+claim to know whether your tool answers locally or over the network, because
+that is your configuration and not Nyrvo's business. The answer is printed under
+`AI ANALYSIS — <agent>`, verbatim, marked as model inference rather than
+observation.
+
+The agent runs in an empty temporary directory. These CLIs are coding agents
+with file tools, and Nyrvo's whole design is that it supplies the evidence
+instead of letting a model go rummaging through your machine; running it where
+there is nothing to read is how that is enforced without depending on any one
+vendor's flags. The trade is real: an agent cannot look at the code that failed,
+so it answers from the evidence Nyrvo vouches for or says it cannot.
+
+Adding another agent is a line in a table — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Configuring an arbitrary command as an agent is deliberately not supported.
+
+`--json` prints one document either way, replacing the diagnosis document rather
+than following it: two JSON documents on one stream is not something a consumer
+can parse, and the request already carries the findings. It reports
+`"executed": false` for a request nobody ran, and `"executed": true` alongside
+`agent`, `command` and `analysis` when one did.
 
 ### Reproducing a CI job
 

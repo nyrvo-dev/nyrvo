@@ -88,6 +88,7 @@ func DefaultRules() []Rule {
 	rules = append(rules, SystemRules()...)
 	rules = append(rules, GitRules()...)
 	rules = append(rules, EnvironmentRules()...)
+	rules = append(rules, ServiceRules()...)
 	return rules
 }
 

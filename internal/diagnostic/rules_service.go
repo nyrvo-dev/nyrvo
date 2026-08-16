@@ -8,13 +8,9 @@ import (
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
 
-// These identifiers live here temporarily so this isolated change does not alter
-// the public finding contract; the lead will move them into the finding package.
-const (
-	ServiceMissing       = "service.missing"
-	ServiceImageMismatch = "service.image_mismatch"
-)
-
+// componentService is not a diff component, and deliberately so: services are
+// never diffed. It exists only to locate these findings in the same vocabulary
+// the others use.
 const componentService = "service"
 
 // ServiceRules returns rules that judge the services a CI job declares against
@@ -22,15 +18,15 @@ const componentService = "service"
 func ServiceRules() []Rule {
 	return []Rule{
 		{
-			ID: ServiceMissing,
+			ID: finding.ServiceMissing,
 			Evaluate: func(in Input) []finding.Finding {
-				return evaluateServices(in, ServiceMissing)
+				return evaluateServices(in, finding.ServiceMissing)
 			},
 		},
 		{
-			ID: ServiceImageMismatch,
+			ID: finding.ServiceImageMismatch,
 			Evaluate: func(in Input) []finding.Finding {
-				return evaluateServices(in, ServiceImageMismatch)
+				return evaluateServices(in, finding.ServiceImageMismatch)
 			},
 		},
 	}
@@ -67,24 +63,24 @@ func evaluateServices(in Input, rule string) []finding.Finding {
 		}
 
 		switch {
-		case rule == ServiceMissing && !matchedName:
+		case rule == finding.ServiceMissing && !matchedName:
 			findings = append(findings, missingServiceFinding(declared, observed, want, wantName))
-		case rule == ServiceImageMismatch && matchedName && mismatchedImage != "":
+		case rule == finding.ServiceImageMismatch && matchedName && mismatchedImage != "":
 			findings = append(findings, mismatchedServiceFinding(declared, observed, want, wantName, mismatchedImage))
 		}
 	}
 	return findings
 }
 
+// serviceSides picks which snapshot is judging and which is judged. Only a
+// CI-derived side declares services worth checking, and only a non-CI side can
+// have been asked what it actually runs — a workflow file and a job log are both
+// silent about containers on the machine reading them.
 func serviceSides(in Input) (declared, observed *snapshot.Snapshot) {
 	switch {
 	case CIDerived(in.A) && !CIDerived(in.B):
 		return in.A, in.B
 	case CIDerived(in.B) && !CIDerived(in.A):
-		return in.B, in.A
-	case Declared(in.A) && !Declared(in.B):
-		return in.A, in.B
-	case Declared(in.B) && !Declared(in.A):
 		return in.B, in.A
 	default:
 		return nil, nil
@@ -122,13 +118,13 @@ func lastImageSegment(ref string) string {
 
 func missingServiceFinding(declared, observed *snapshot.Snapshot, service snapshot.Service, name string) finding.Finding {
 	return finding.Finding{
-		Rule:      ServiceMissing,
+		Rule:      finding.ServiceMissing,
 		Severity:  finding.SeverityMedium,
 		Component: componentService,
 		Key:       name,
 		Expected:  service.Image,
 		Actual:    "no matching running container",
-		Description: fmt.Sprintf("The job %s declares %s, but %s's running containers do not include image name %s.",
+		Description: fmt.Sprintf("%s declares the service %s, but %s's running containers include no image named %s.",
 			Name(declared), service.Image, Name(observed), name),
 		Recommendation: fmt.Sprintf("Verify that %s can reach the required service. Nyrvo only sees running containers, so a natively installed service or one using a different image name is invisible to Nyrvo.",
 			Name(observed)),
@@ -137,13 +133,13 @@ func missingServiceFinding(declared, observed *snapshot.Snapshot, service snapsh
 
 func mismatchedServiceFinding(declared, observed *snapshot.Snapshot, service snapshot.Service, name, actual string) finding.Finding {
 	return finding.Finding{
-		Rule:      ServiceImageMismatch,
+		Rule:      finding.ServiceImageMismatch,
 		Severity:  finding.SeverityMedium,
 		Component: componentService,
 		Key:       name,
 		Expected:  service.Image,
 		Actual:    actual,
-		Description: fmt.Sprintf("The job %s declares %s, but %s has %s running for the same image name.",
+		Description: fmt.Sprintf("%s declares the service %s, but %s has %s running instead.",
 			Name(declared), service.Image, Name(observed), actual),
 		Recommendation: fmt.Sprintf("Run %s in %s, or change the job's declared service image if %s is intentional.",
 			service.Image, Name(observed), actual),

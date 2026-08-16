@@ -126,6 +126,18 @@ $ nyrvo capture local
 $ nyrvo doctor --fail-on=high
 ```
 
+Two rules judge a CI job's backing services rather than comparing environments.
+`service.missing` reports a service a job declares — a postgres, a redis — that
+no container running here provides, and `service.image_mismatch` reports the
+same image name running at a different tag. Nyrvo only sees containers, so the
+finding says as much: a natively installed service is invisible to it, and a
+machine whose Docker daemon is not answering produces no finding at all rather
+than a false one.
+
+Services are never compared between environments. A laptop runs whatever its
+owner has up and a job runs the two sidecars it asked for; listing the
+difference describes a desk, not a defect.
+
 One rule never compares two environments at all.
 `runtime.requirement_unsatisfied` (always high) judges an environment against
 what the checked-out project declares it needs, and reports when it does not
@@ -259,6 +271,7 @@ $ nyrvo version
 - Go, Node.js, Python, Ruby, PHP, Rust and Java versions (including install
   paths)
 - Docker client, server, and compose versions, and whether the daemon answers
+- The container images running here, and the services a CI job declares
 - The version constraints the checked-out project declares
 - Environment variable **names**
 - From CI: the runner platform, setup-action runtime versions, declared

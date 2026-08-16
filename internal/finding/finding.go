@@ -57,6 +57,12 @@ const (
 	// GitDirty: a working tree has uncommitted changes, so its SHA does not
 	// describe what actually ran.
 	GitDirty = "git.dirty"
+	// ServiceMissing: a CI job declares a backing container and nothing running
+	// on the other environment provides that image.
+	ServiceMissing = "service.missing"
+	// ServiceImageMismatch: both environments have the same image name at
+	// different tags — a job on postgres:16 against a machine on postgres:14.
+	ServiceImageMismatch = "service.image_mismatch"
 )
 
 // Finding is one diagnosed difference.

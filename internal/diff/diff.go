@@ -200,7 +200,16 @@ func systemValues(s *snapshot.Snapshot) map[string]string {
 	if s == nil || s.System == nil {
 		return nil
 	}
-	v := map[string]string{"os": s.System.OS, "arch": s.System.Arch}
+	v := map[string]string{}
+	// A source can know the operating system without knowing the architecture:
+	// a hosted runner's log names its distribution and never states an arch.
+	// An unobserved field contributes no key rather than an empty value.
+	if s.System.OS != "" {
+		v["os"] = s.System.OS
+	}
+	if s.System.Arch != "" {
+		v["arch"] = s.System.Arch
+	}
 	// An unobserved kernel contributes no key, so it is reported as only_in_*
 	// rather than as a change from a real value to the empty string. "We could
 	// not see this here" is itself evidence and is not silently dropped.

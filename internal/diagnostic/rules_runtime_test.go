@@ -163,3 +163,33 @@ func TestRuntimeRulesNilInput(t *testing.T) {
 		t.Errorf("missing on empty diff: %+v", got)
 	}
 }
+
+// A snapshot imported from a run is an observation, but a partial one: its
+// runtimes come from the setup actions the log shows, never from an inventory
+// of the runner image. The finding must therefore describe the evidence, not
+// claim the machine lacks the runtime.
+func TestRuntimeMissingDoesNotOverclaimAgainstARun(t *testing.T) {
+	local := snapshot.New("local", time.Now())
+	local.Runtimes = []snapshot.Runtime{{Name: "node", Version: "23.6.0"}, {Name: "go", Version: "1.26.6"}}
+
+	ci := snapshot.New("ci", time.Now())
+	ci.Source = &snapshot.Source{Kind: snapshot.SourceGitHubActionsRun, Ref: "owner/repo run 1"}
+	ci.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.6"}}
+
+	findings := Run(RuntimeRules(), Input{A: local, B: ci, Diff: diff.Compare(local, ci)})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one for the missing node", findings)
+	}
+	f := findings[0]
+	if f.Rule != finding.RuntimeMissing || f.Key != "node" {
+		t.Fatalf("finding = %+v, want runtime.missing for node", f)
+	}
+	// The wording must not assert the runner lacks node — only that nothing in
+	// the run set it up.
+	if strings.Contains(f.Description, "does not have") || strings.Contains(f.Description, "does not.") {
+		t.Errorf("description overclaims what the run proves: %q", f.Description)
+	}
+	if !strings.Contains(f.Description, "may still provide") {
+		t.Errorf("description should say the image may still provide it: %q", f.Description)
+	}
+}

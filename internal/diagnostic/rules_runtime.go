@@ -132,6 +132,10 @@ func runtimeMissingFinding(in Input, d diff.Difference) finding.Finding {
 	switch {
 	case Declared(lacksSide):
 		description = fmt.Sprintf("The workflow %s does not set up %s.", declaredRef(in), d.Key)
+	case CIDerived(lacksSide):
+		// A run's log shows what the setup actions installed, never the whole
+		// image, so the honest claim is about the evidence, not the machine.
+		description = fmt.Sprintf("Nothing in the %s run set up %s; the runner image may still provide it.", Name(lacksSide), d.Key)
 	case Declared(hasSide):
 		description = fmt.Sprintf("%s sets up %s, but %s does not have it installed.", Name(hasSide), d.Key, Name(lacksSide))
 	default:
@@ -142,6 +146,8 @@ func runtimeMissingFinding(in Input, d diff.Difference) finding.Finding {
 	switch {
 	case Declared(lacksSide):
 		recommendation = fmt.Sprintf("Add a setup action for %s to the workflow, or confirm the runner image provides it; a workflow's silence is not proof the runner lacks it.", d.Key)
+	case CIDerived(lacksSide):
+		recommendation = fmt.Sprintf("Check whether %s needs to be set up explicitly in CI, or confirm the runner image already provides the version you expect.", d.Key)
 	case Declared(hasSide):
 		recommendation = fmt.Sprintf("Install %s in %s to match what the workflow sets up, or adjust the workflow.", d.Key, Name(lacksSide))
 	default:

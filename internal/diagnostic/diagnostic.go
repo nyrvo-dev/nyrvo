@@ -45,6 +45,21 @@ func Declared(s *snapshot.Snapshot) bool {
 	return s != nil && s.Source != nil && s.Source.Kind == snapshot.SourceGitHubActions
 }
 
+// CIDerived reports whether a snapshot describes a CI environment, whether it
+// came from a workflow file or from a run that happened.
+//
+// Neither source enumerates what a runner image already provides: a workflow
+// file lists the setup actions it asks for, and a job log shows the versions
+// those actions installed. Both are silent about everything else the image
+// ships. A rule may therefore say "CI does not set this up" but never "CI does
+// not have this" — the difference between a source's silence and a fact.
+func CIDerived(s *snapshot.Snapshot) bool {
+	if s == nil || s.Source == nil {
+		return false
+	}
+	return s.Source.Kind == snapshot.SourceGitHubActions || s.Source.Kind == snapshot.SourceGitHubActionsRun
+}
+
 // Name returns a snapshot's name, or a placeholder, for use in descriptions.
 func Name(s *snapshot.Snapshot) string {
 	if s == nil || s.Name == "" {

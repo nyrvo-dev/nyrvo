@@ -11,6 +11,10 @@ not.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.2] — 2026-08-17
+
 ### Fixed
 
 - A tool that ran out of time is no longer recorded as a tool that is absent.
@@ -122,6 +126,7 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nyrvo-dev/nyrvo/releases/tag/v0.1.0

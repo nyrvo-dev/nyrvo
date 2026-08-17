@@ -349,6 +349,19 @@ and golangci-lint).
 Go 1.25 is the minimum supported version; development runs on 1.26. CI verifies
 both.
 
+## How this is built
+
+Nyrvo is written by [@lucascnunes](https://github.com/lucascnunes) with Claude
+(Anthropic) as the implementing tool, under review. Direction, design decisions
+and acceptance are human; a large share of the code and prose is model-written.
+
+That arrangement is disclosed because the project's whole argument is refusing to
+claim what has not been verified, and how the code came to exist is part of what
+a reader is entitled to check. It changes nothing about the standard the code is
+held to: every commit builds and tests in isolation, CI runs the suite on three
+operating systems, and every serious defect this project has found was found by
+running the tool against real data rather than by reading a diff.
+
 ## License
 
 [MIT](LICENSE)

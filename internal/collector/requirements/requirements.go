@@ -107,20 +107,24 @@ func readSource(dir, name string) ([]byte, bool) {
 	return body, true
 }
 
-// packageJSON reads the engines section of package.json. The file is untrusted
-// repository input, so it is decoded into a struct holding exactly the fields
-// Nyrvo reads — never a map walked blindly, and nothing is ever executed.
+// packageJSON reads the engines section and the packageManager field of
+// package.json. The file is untrusted repository input, so it is decoded into a
+// struct holding exactly the fields Nyrvo reads — never a map walked blindly,
+// and nothing is ever executed.
 //
 // engines.npm is recorded under Runtime "npm" rather than being folded into
 // "node": npm's version is independent of Node's and a finding must be able to
-// point at the one that is actually wrong.
+// point at the one that is actually wrong. The packageManager field pins the
+// exact package-manager version corepack must run and is read by
+// packageManagerReq.
 func packageJSONReqs(dir string) []snapshot.Requirement {
 	body, ok := readSource(dir, "package.json")
 	if !ok {
 		return nil
 	}
 	var pj struct {
-		Engines struct {
+		PackageManager string `json:"packageManager"`
+		Engines        struct {
 			Node string `json:"node"`
 			NPM  string `json:"npm"`
 		} `json:"engines"`
@@ -135,6 +139,9 @@ func packageJSONReqs(dir string) []snapshot.Requirement {
 	}
 	if v := strings.TrimSpace(pj.Engines.NPM); v != "" {
 		reqs = append(reqs, snapshot.Requirement{Runtime: "npm", Constraint: v, Source: "package.json engines.npm"})
+	}
+	if req := packageManagerReq(pj.PackageManager); req != nil {
+		reqs = append(reqs, *req)
 	}
 	return reqs
 }

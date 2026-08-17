@@ -159,6 +159,10 @@ var setupActions = []setupAction{
 	// here; a version hidden in the tag is left unknown rather than guessed,
 	// which is the same rule the rest of the parser follows.
 	{path: "dtolnay/rust-toolchain", runtime: "rust", version: "toolchain"},
+	// pnpm/action-setup names its version in a "version" input and has no
+	// version-file equivalent, so file stays empty exactly as it does for
+	// dtolnay/rust-toolchain.
+	{path: "pnpm/action-setup", runtime: "pnpm", version: "version"},
 }
 
 // matchSetupAction reports the setup action a step's Uses references, or nil.

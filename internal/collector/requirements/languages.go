@@ -52,6 +52,47 @@ func globalJSONReqs(dir string) []snapshot.Requirement {
 	}}
 }
 
+// packageManagerReq reads the packageManager field, which corepack uses to
+// select the exact package-manager version to run. The value is
+// "<name>@<version>" and may carry a "+sha512.<hex>" integrity suffix that is
+// not part of the version, so it is stripped before recording.
+//
+// It is a PIN, not a floor: corepack downloads and runs precisely that version
+// and refuses anything else, so a machine with any other version genuinely
+// cannot build this project. This is the opposite of the go directive in go.mod
+// and of global.json sdk.version — both roll forward to a newer installed
+// toolchain, and this repo has already recorded both as pins before learning
+// that. Minimum stays false so the exact version is enforced, and it must not
+// be "fixed" into a floor.
+//
+// Only npm, pnpm and yarn are understood; corepack knows no others. A different
+// name, a value without the "@" that separates name and version, or an empty
+// version, is a constraint Nyrvo cannot read — and ADR 0012 says such a
+// constraint produces no requirement rather than a guess.
+func packageManagerReq(pm string) *snapshot.Requirement {
+	name, value, ok := strings.Cut(strings.TrimSpace(pm), "@")
+	if !ok {
+		return nil
+	}
+	switch name {
+	case "npm", "pnpm", "yarn":
+	default:
+		return nil
+	}
+	if i := strings.IndexByte(value, '+'); i >= 0 {
+		value = value[:i]
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	return &snapshot.Requirement{
+		Runtime:    name,
+		Constraint: value,
+		Source:     "package.json packageManager",
+	}
+}
+
 // rubyVersionReqs drops ruby-'s selector syntax because runtime observations
 // contain only the version that selector resolves to.
 func rubyVersionReqs(dir string) []snapshot.Requirement {

@@ -244,6 +244,38 @@ func TestCIImportRunCallError(t *testing.T) {
 	}
 }
 
+// The spinner on ci import must be a no-op for a non-terminal destination. The
+// message a pipe, a file or a CI log receives is byte-for-byte what it was
+// before the spinner existed — the animation exists only on a terminal, and
+// nothing here may leak into the stream.
+func TestCIImportNonTerminalBytesUnchanged(t *testing.T) {
+	stub := &ciExecStub{
+		runDoc:  readFixture(t, "run-failed.json"),
+		jobsDoc: readFixture(t, "jobs-failed.json"),
+		logDoc:  readLogFixture(t, "log-failure.txt"),
+	}
+	stubCIClient(t, stub)
+	chdirWorkDir(t)
+
+	code, stdout, errOut := run(t, "ci", "import", "31921289286")
+	if code != ExitOK {
+		t.Fatalf("ci import: exit %d, stderr: %s", code, errOut)
+	}
+	want := `Imported 31921289286 job "activation" (the only job that failed).
+Snapshot saved: ci, replacing any previous ci snapshot.
+
+Diagnose it against this machine:
+  nyrvo capture local
+  nyrvo doctor
+`
+	if stdout != want {
+		t.Errorf("non-terminal ci import output changed\ngot:\n%q\nwant:\n%q", stdout, want)
+	}
+	if strings.Contains(stdout, "\x1b") || strings.Contains(stdout, "\r") {
+		t.Errorf("ci import stdout carries animation bytes:\n%s", stdout)
+	}
+}
+
 func TestCIImportUsage(t *testing.T) {
 	stub := &ciExecStub{}
 	stubCIClient(t, stub)

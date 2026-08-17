@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -288,6 +289,105 @@ func TestDoctorFailOn(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "--fail-on threshold") {
 		t.Errorf("stderr should say why the exit code is non-zero, got: %s", errOut)
+	}
+}
+
+// fakeAgentOnPATH makes an executable named `name` answer for the duration of
+// the test, so the whole `doctor --agent` path can run without an agent CLI
+// being installed. It ignores the prompt and prints a fixed answer, which is
+// enough to exercise the disclosure, the wait, and the rendering around it.
+func fakeAgentOnPATH(t *testing.T, name string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("impersonating an agent CLI needs a POSIX shell")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, name)
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf 'THE AGENT ANSWER\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake agent %s: %v", name, err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// The agent run is the longest silent wait in the tool, so a spinner animates
+// beside it on a terminal. To a non-terminal writer that spinner must be a
+// no-op: the bytes a pipe, a file or a CI log receives are exactly what they
+// were before the spinner existed — no carriage return, no escape sequence —
+// and the disclosure is still the last thing read before the agent starts.
+func TestDoctorAgentNonTerminalBytesUnchanged(t *testing.T) {
+	fakeAgentOnPATH(t, "claude")
+	chdirWorkDir(t)
+	mustCapture(t, "local")
+	mustCapture(t, "other")
+
+	code, stdout, errOut := run(t, "doctor", "local", "other", "--agent=claude")
+	if code != ExitOK {
+		t.Fatalf("doctor --agent=claude: exit %d, stderr: %s", code, errOut)
+	}
+	for label, s := range map[string]string{"stdout": stdout, "stderr": errOut} {
+		if strings.Contains(s, "\x1b") || strings.Contains(s, "\r") {
+			t.Errorf("%s carries animation bytes into a non-terminal writer:\n%s", label, s)
+		}
+	}
+	if !strings.Contains(stdout, "AI AGENT EXECUTION") {
+		t.Errorf("the disclosure must still be on stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "THE AGENT ANSWER") {
+		t.Errorf("the agent answer must still be on stdout:\n%s", stdout)
+	}
+}
+
+// Under --json the disclosure and the spinner share stderr, so stdout must stay
+// a single parseable document and must not gain a single animation byte.
+func TestDoctorAgentJSONStaysParseable(t *testing.T) {
+	fakeAgentOnPATH(t, "claude")
+	chdirWorkDir(t)
+	mustCapture(t, "local")
+	mustCapture(t, "other")
+
+	code, stdout, errOut := run(t, "doctor", "local", "other", "--json", "--agent=claude")
+	if code != ExitOK {
+		t.Fatalf("doctor --json --agent=claude: exit %d, stderr: %s", code, errOut)
+	}
+	var res map[string]any
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, stdout)
+	}
+	if strings.Contains(stdout, "\x1b") || strings.Contains(stdout, "\r") {
+		t.Errorf("JSON stdout carries animation bytes:\n%s", stdout)
+	}
+	if !strings.Contains(errOut, "AI AGENT EXECUTION") {
+		t.Errorf("the disclosure should be on stderr under --json, got: %s", errOut)
+	}
+	if strings.Contains(errOut, "\x1b") || strings.Contains(errOut, "\r") {
+		t.Errorf("stderr carries animation bytes into a non-terminal writer:\n%s", errOut)
+	}
+}
+
+// `doctor <run>` fetches through the same network path as ci import, so it gets
+// the same spinner treatment on stderr, where progress lives. To a non-terminal
+// writer the spinner is a no-op and the bytes are exactly what they were before.
+func TestDoctorRunNonTerminalBytesUnchanged(t *testing.T) {
+	stub := &ciExecStub{
+		runDoc:  readFixture(t, "run-failed.json"),
+		jobsDoc: readFixture(t, "jobs-failed.json"),
+		logDoc:  readLogFixture(t, "log-failure.txt"),
+	}
+	stubCIClient(t, stub)
+	chdirWorkDir(t)
+
+	code, stdout, errOut := run(t, "doctor", "31921289286")
+	if code != ExitOK {
+		t.Fatalf("doctor <run>: exit %d, stderr: %s", code, errOut)
+	}
+	if strings.Contains(stdout, "\x1b") || strings.Contains(stdout, "\r") {
+		t.Errorf("stdout carries animation bytes into a non-terminal writer:\n%s", stdout)
+	}
+	// The stderr the spinner shares is exactly the progress line that was there
+	// before the spinner existed, byte for byte.
+	want := "Diagnosing 31921289286 job \"activation\" (the only job that failed) against this machine.\n"
+	if errOut != want {
+		t.Errorf("stderr changed on a non-terminal writer\ngot:\n%q\nwant:\n%q", errOut, want)
 	}
 }
 

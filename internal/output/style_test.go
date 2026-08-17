@@ -31,20 +31,20 @@ type terminalBuffer struct {
 
 func (terminalBuffer) Stat() (os.FileInfo, error) { return terminalFileInfo{}, nil }
 
-// unsetNOCOLOR removes NO_COLOR for the duration of a test and restores it
-// afterwards. The test harness may run under a shell that exports NO_COLOR, and
-// a test of colour must control that variable itself rather than inherit it.
+// unsetNOCOLOR removes NO_COLOR for the duration of a test. The harness may run
+// under a shell that exports it, and a test of colour must control that variable
+// rather than inherit it.
+//
+// t.Setenv is called only to register its restore, which already returns the
+// variable to whatever it was — including "not set at all". The Unsetenv that
+// follows is the part the test needs: NO_COLOR set to the empty string means "no
+// colour", so setting it to "" would assert the opposite of what is wanted here.
 func unsetNOCOLOR(t *testing.T) {
 	t.Helper()
-	old, had := os.LookupEnv("NO_COLOR")
-	os.Unsetenv("NO_COLOR")
-	t.Cleanup(func() {
-		if had {
-			os.Setenv("NO_COLOR", old)
-		} else {
-			os.Unsetenv("NO_COLOR")
-		}
-	})
+	t.Setenv("NO_COLOR", "")
+	if err := os.Unsetenv("NO_COLOR"); err != nil {
+		t.Fatalf("Unsetenv NO_COLOR: %v", err)
+	}
 }
 
 // A bytes.Buffer has no Stat method, so it must never be treated as a terminal.

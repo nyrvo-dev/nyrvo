@@ -184,8 +184,29 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return usageErr("capture takes exactly one snapshot name")
 	}
 	name := operands[0]
+	// Checked here as well as inside capture.Run so a bad name is refused before
+	// the header claims a capture is under way.
+	if err := snapshot.ValidateName(name); err != nil {
+		return err
+	}
 
-	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{Name: name})
+	// Progress follows the snapshot: when the document goes to stdout, the
+	// status lines go to stderr, so a JSON consumer still reads a clean stream.
+	progress := stdout
+	if *asJSON {
+		progress = stderr
+	}
+	if err := output.CaptureHeader(progress); err != nil {
+		return err
+	}
+
+	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{
+		Name: name,
+		// ponytail: a write error here is dropped, because the callback has
+		// nowhere to return it. A writer that is genuinely broken still surfaces
+		// through the checked write that follows the capture.
+		OnSection: func(s capture.SectionResult) { _ = output.CaptureSection(progress, s) },
+	})
 	if err != nil {
 		return err
 	}
@@ -200,21 +221,12 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 
 	if *asJSON {
 		// Machine-readable output is the snapshot document itself, so `nyrvo
-		// capture --json` and the stored file are interchangeable. Collector
-		// status goes to stderr to keep stdout a clean JSON stream.
-		if err := output.CaptureText(stderr, res); err != nil {
-			return err
-		}
+		// capture --json` and the stored file are interchangeable.
 		if err := output.SnapshotJSON(stdout, res.Snapshot); err != nil {
 			return err
 		}
-	} else {
-		if err := output.CaptureText(stdout, res); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintf(stdout, "\nSnapshot saved: %s\n", name); err != nil {
-			return err
-		}
+	} else if _, err := fmt.Fprintf(stdout, "\nSnapshot saved: %s\n", name); err != nil {
+		return err
 	}
 
 	if res.Failed() {

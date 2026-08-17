@@ -163,18 +163,33 @@ func TestDiffTextPartialEnvironmentNote(t *testing.T) {
 	}
 }
 
-func TestCaptureTextStatusLines(t *testing.T) {
-	res := &capture.Result{
-		Sections: []capture.SectionResult{
-			{Collector: "system", Status: capture.StatusOK},
-			{Collector: "git", Status: capture.StatusUnavailable, Error: "not a git repository"},
-			// A runtime that is installed and refuses to answer carries the
-			// reason, which is often the drift the capture was run to find.
-			{Collector: "rust", Status: capture.StatusUnavailable, Error: "rust: rustc --version: exit status 1: Missing manifest: collector unavailable"},
-			// One that is simply absent says nothing beyond its own name.
-			{Collector: "ruby", Status: capture.StatusUnavailable, Error: "ruby: collector unavailable"},
-			{Collector: "python", Status: capture.StatusFailed, Error: "boom: exit status 1"},
-		},
+// captureLines renders a header and every section the way the CLI does, so the
+// streamed output can be asserted as one document.
+func captureLines(t *testing.T, sections []capture.SectionResult) string {
+	t.Helper()
+	return render(t, func(w io.Writer) error {
+		if err := CaptureHeader(w); err != nil {
+			return err
+		}
+		for _, s := range sections {
+			if err := CaptureSection(w, s); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func TestCaptureSectionStatusLines(t *testing.T) {
+	sections := []capture.SectionResult{
+		{Collector: "system", Status: capture.StatusOK},
+		{Collector: "git", Status: capture.StatusUnavailable, Error: "not a git repository"},
+		// A runtime that is installed and refuses to answer carries the
+		// reason, which is often the drift the capture was run to find.
+		{Collector: "rust", Status: capture.StatusUnavailable, Error: "rust: rustc --version: exit status 1: Missing manifest: collector unavailable"},
+		// One that is simply absent says nothing beyond its own name.
+		{Collector: "ruby", Status: capture.StatusUnavailable, Error: "ruby: collector unavailable"},
+		{Collector: "python", Status: capture.StatusFailed, Error: "boom: exit status 1"},
 	}
 	want := "Capturing environment...\n\n" +
 		"  ok        system\n" +
@@ -182,26 +197,37 @@ func TestCaptureTextStatusLines(t *testing.T) {
 		"  skipped   rust (rustc --version: exit status 1: Missing manifest)\n" +
 		"  skipped   ruby (not available here)\n" +
 		"  FAILED    python: boom: exit status 1\n"
-	if got := render(t, func(w io.Writer) error { return CaptureText(w, res) }); got != want {
-		t.Errorf("CaptureText status lines\ngot:\n%q\nwant:\n%q", got, want)
+	if got := captureLines(t, sections); got != want {
+		t.Errorf("capture status lines\ngot:\n%q\nwant:\n%q", got, want)
 	}
 }
 
-// TestCaptureTextOmitsErrorForOKSection guards the section body: a successful
-// collector's Error field must never leak into output, even if a caller leaves
-// it populated.
-func TestCaptureTextOmitsErrorForOKSection(t *testing.T) {
-	res := &capture.Result{
-		Sections: []capture.SectionResult{
-			{Collector: "system", Status: capture.StatusOK, Error: "this must never be printed"},
-		},
+// Each section must be one complete line on its own. Streaming means a reader
+// sees the line before the next collector has even started, so a renderer that
+// relied on a later write to terminate it would leave the terminal mid-line for
+// as long as the next tool takes to answer.
+func TestCaptureSectionWritesOneWholeLine(t *testing.T) {
+	got := render(t, func(w io.Writer) error {
+		return CaptureSection(w, capture.SectionResult{Collector: "system", Status: capture.StatusOK})
+	})
+	if got != "  ok        system\n" {
+		t.Errorf("CaptureSection wrote %q, want a single terminated line", got)
 	}
-	want := "Capturing environment...\n\n  ok        system\n"
-	if got := render(t, func(w io.Writer) error { return CaptureText(w, res) }); got != want {
-		t.Errorf("CaptureText OK section\ngot:\n%q\nwant:\n%q", got, want)
+}
+
+// TestCaptureSectionOmitsErrorForOKSection guards the section body: a
+// successful collector's Error field must never leak into output, even if a
+// caller leaves it populated.
+func TestCaptureSectionOmitsErrorForOKSection(t *testing.T) {
+	sections := []capture.SectionResult{
+		{Collector: "system", Status: capture.StatusOK, Error: "this must never be printed"},
 	}
-	if strings.Contains(render(t, func(w io.Writer) error { return CaptureText(w, res) }), "must never be printed") {
-		t.Error("CaptureText leaked an OK section's error text")
+	got := captureLines(t, sections)
+	if want := "Capturing environment...\n\n  ok        system\n"; got != want {
+		t.Errorf("capture OK section\ngot:\n%q\nwant:\n%q", got, want)
+	}
+	if strings.Contains(got, "must never be printed") {
+		t.Error("CaptureSection leaked an OK section's error text")
 	}
 }
 
@@ -293,8 +319,9 @@ func TestRenderersPropagateWriterError(t *testing.T) {
 		run  func(w io.Writer) error
 	}{
 		{"JSON", func(w io.Writer) error { return JSON(w, map[string]string{"a": "b"}) }},
-		{"CaptureText", func(w io.Writer) error {
-			return CaptureText(w, &capture.Result{Sections: []capture.SectionResult{{Collector: "system", Status: capture.StatusOK}}})
+		{"CaptureHeader", CaptureHeader},
+		{"CaptureSection", func(w io.Writer) error {
+			return CaptureSection(w, capture.SectionResult{Collector: "system", Status: capture.StatusOK})
 		}},
 		{"DiffText empty", func(w io.Writer) error { return DiffText(w, noDiff) }},
 		{"DiffText aligned", func(w io.Writer) error { return DiffText(w, withDiff) }},

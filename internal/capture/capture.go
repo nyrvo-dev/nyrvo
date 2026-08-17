@@ -71,6 +71,16 @@ type Options struct {
 	// Now supplies the capture timestamp; tests inject a fixed clock so golden
 	// output stays stable.
 	Now func() time.Time
+	// OnSectionStart is called immediately before each collector runs, in the
+	// same order as the collectors. It mirrors OnSection, which fires after the
+	// collector answers, so a caller can show progress while a collector is
+	// running: a capture spawns a dozen external tools and takes seconds, and a
+	// label that only appeared after the tool answered would still leave the
+	// terminal silent for the whole wait.
+	//
+	// Capture does not print. It hands the event up and lets the caller decide
+	// whether anything is rendered at all.
+	OnSectionStart func(name string)
 	// OnSection is called as each collector finishes, before the next one
 	// starts. Run still returns every section in the Result; this exists only so
 	// a caller can report progress while the capture is happening. A capture
@@ -116,6 +126,9 @@ func Run(ctx context.Context, collectors []collector.Collector, opts Options) (*
 		// presented as complete would be misleading evidence.
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("capture cancelled during %q: %w", c.Name(), err)
+		}
+		if opts.OnSectionStart != nil {
+			opts.OnSectionStart(c.Name())
 		}
 		section := SectionResult{Collector: c.Name(), Status: StatusOK}
 		switch err := c.Collect(ctx, snap); {

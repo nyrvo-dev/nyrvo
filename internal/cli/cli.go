@@ -201,12 +201,26 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 		return err
 	}
 
+	// The spinner animates on the same progress writer as the status lines,
+	// never on stdout: with --json the document goes to stdout and must stay
+	// pure, so the animation shares stderr with the sections. When progress is
+	// not a terminal the spinner is a silent no-op that writes nothing.
+	spinner := output.NewSpinner(progress)
+
 	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{
 		Name: name,
+		OnSectionStart: func(sectionName string) {
+			spinner.Start(sectionName)
+		},
 		// ponytail: a write error here is dropped, because the callback has
 		// nowhere to return it. A writer that is genuinely broken still surfaces
 		// through the checked write that follows the capture.
-		OnSection: func(s capture.SectionResult) { _ = output.CaptureSection(progress, s) },
+		OnSection: func(s capture.SectionResult) {
+			// The spinner is erased before the result line is written so the
+			// section lands on a clean line.
+			spinner.Stop()
+			_ = output.CaptureSection(progress, s)
+		},
 	})
 	if err != nil {
 		return err

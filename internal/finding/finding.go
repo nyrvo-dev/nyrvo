@@ -40,6 +40,10 @@ const (
 	RuntimeVersionMismatch = "runtime.version_mismatch"
 	// RuntimeMissing: one environment has a runtime the other does not.
 	RuntimeMissing = "runtime.missing"
+	// RuntimeUnusable: one environment has a runtime installed, but it would
+	// not report a version — usually a pinned toolchain this machine does not
+	// have. The tool is present, so this is not a missing runtime.
+	RuntimeUnusable = "runtime.unusable"
 	// RuntimeRequirementUnsatisfied: the project declares a version constraint
 	// that an environment does not meet. Unlike every other rule, this one does
 	// not compare two environments — it compares an environment against what

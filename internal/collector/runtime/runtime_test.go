@@ -361,11 +361,17 @@ func TestProbeThatRunsOutOfTimeIsUnmeasuredNotAbsent(t *testing.T) {
 	if got, want := snap.Unmeasured, []string{"runtime.slowlang"}; !slices.Equal(got, want) {
 		t.Errorf("Unmeasured = %v, want %v", got, want)
 	}
+	// A timeout proves nothing about whether the tool works, so it must never be
+	// published as unusable — a refusal is a fact, a timeout is a question.
+	if len(snap.Unusable) != 0 {
+		t.Errorf("a probe that ran out of time was marked unusable: %v", snap.Unusable)
+	}
 }
 
 // A runtime that is simply not installed must not be marked unmeasured: that
 // would suppress a real difference, which is the opposite failure and just as
-// wrong.
+// wrong. It must not be marked unusable either — nothing was found on PATH, so
+// there is nothing to call installed.
 func TestAbsentRuntimeIsNotMarkedUnmeasured(t *testing.T) {
 	c := newCollector("nyrvo-absent", probe{binary: "nyrvo-definitely-absent", args: []string{"--version"}})
 	snap := snapshot.New("local", time.Time{})
@@ -374,6 +380,31 @@ func TestAbsentRuntimeIsNotMarkedUnmeasured(t *testing.T) {
 	}
 	if len(snap.Unmeasured) != 0 {
 		t.Errorf("an absent runtime was marked unmeasured: %v", snap.Unmeasured)
+	}
+	if len(snap.Unusable) != 0 {
+		t.Errorf("an absent runtime was marked unusable: %v", snap.Unusable)
+	}
+}
+
+// A binary that exists and exits non-zero is what dotnet, rustc and ruby all
+// produce when a project pins a toolchain the machine does not have. The
+// runtime is installed — LookPath found it — and refusing is deterministic:
+// asking again gives the same answer. That is not unmeasured, which the diff
+// would skip; the snapshot must record it so doctor can report it.
+func TestProbeThatRefusesToAnswerIsUnusableNotUnmeasured(t *testing.T) {
+	dir := fakeProbe(t, "nyrvo-refuses", "", "error: toolchain not found\n", 1)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := newCollector("refuses", probe{binary: "nyrvo-refuses", args: []string{"--version"}})
+	snap := snapshot.New("local", time.Time{})
+	if err := c.Collect(context.Background(), snap); !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if got, want := snap.Unusable, []string{"runtime.refuses"}; !slices.Equal(got, want) {
+		t.Errorf("Unusable = %v, want %v", got, want)
+	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("a refusal was marked unmeasured: %v", snap.Unmeasured)
 	}
 }
 

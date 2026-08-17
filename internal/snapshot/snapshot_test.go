@@ -32,6 +32,8 @@ func newTestSnapshot(name string) *Snapshot {
 func clone(s *Snapshot) *Snapshot {
 	c := *s
 	c.Runtimes = append([]Runtime(nil), s.Runtimes...)
+	c.Unmeasured = append([]string(nil), s.Unmeasured...)
+	c.Unusable = append([]string(nil), s.Unusable...)
 	if s.Environment != nil {
 		env := *s.Environment
 		env.Names = append([]string(nil), s.Environment.Names...)
@@ -208,6 +210,42 @@ func TestNormalizeSortsAndDeduplicatesUnmeasured(t *testing.T) {
 	}
 }
 
+// The unusable list is sorted and deduplicated for the same reason the
+// unmeasured one is: several probes can report the same runtime, and two
+// captures of one machine must serialize identically.
+func TestNormalizeSortsAndDeduplicatesUnusable(t *testing.T) {
+	s := New("local", time.Time{})
+	s.MarkUnusable("runtime", "dotnet")
+	s.MarkUnusable("runtime", "rust")
+	s.MarkUnusable("runtime", "dotnet")
+
+	s.Normalize()
+
+	want := []string{"runtime.dotnet", "runtime.rust"}
+	if !slices.Equal(s.Unusable, want) {
+		t.Errorf("Unusable = %v, want %v", s.Unusable, want)
+	}
+}
+
+func TestIsUnusable(t *testing.T) {
+	s := New("local", time.Time{})
+	s.MarkUnusable("runtime", "dotnet")
+
+	if !s.IsUnusable("runtime", "dotnet") {
+		t.Error(`IsUnusable("runtime", "dotnet") = false, want true`)
+	}
+	if s.IsUnusable("runtime", "rust") {
+		t.Error(`IsUnusable("runtime", "rust") = true, want false`)
+	}
+	if s.IsUnusable("docker", "dotnet") {
+		t.Error(`IsUnusable("docker", "dotnet") = true, want false`)
+	}
+	var nilSnap *Snapshot
+	if nilSnap.IsUnusable("runtime", "dotnet") {
+		t.Error("nil IsUnusable = true, want false")
+	}
+}
+
 // The field is additive and optional, so a snapshot that measured everything
 // must serialise exactly as it did before this field existed.
 func TestUnmeasuredIsOmittedWhenEverythingWasMeasured(t *testing.T) {
@@ -218,5 +256,18 @@ func TestUnmeasuredIsOmittedWhenEverythingWasMeasured(t *testing.T) {
 	}
 	if strings.Contains(string(data), "unmeasured") {
 		t.Errorf("a complete snapshot carries an unmeasured key:\n%s", data)
+	}
+}
+
+// The field is additive and optional, so a snapshot with nothing unusable must
+// serialise exactly as it did before this field existed.
+func TestUnusableIsOmittedWhenEverythingWasUsable(t *testing.T) {
+	s := New("local", time.Time{})
+	data, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "unusable") {
+		t.Errorf("a snapshot with nothing unusable carries an unusable key:\n%s", data)
 	}
 }

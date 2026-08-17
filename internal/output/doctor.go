@@ -20,8 +20,14 @@ import (
 // model. It is printed as-is and never ranked: it is testimony, not diagnosis,
 // and a reader asking "why did this fail?" needs it even when no rule matched.
 func DoctorText(w io.Writer, a, b string, findings []finding.Finding, context ...string) error {
+	// Style is decided per writer: colour must not reach a buffer, file, or
+	// pipe, and the decision lives here rather than in each line of code that
+	// builds a heading.
+	st := NewStyle(w)
 	var buf strings.Builder
-	fmt.Fprintf(&buf, "NYRVO DOCTOR\n\n%s vs %s\n", a, b)
+	// The title is a full-width line of its own and carries no tab, so styling
+	// it cannot shift a tabwriter column.
+	fmt.Fprintf(&buf, "%s\n\n%s vs %s\n", st.Bold("NYRVO DOCTOR"), a, b)
 
 	if len(context) > 0 {
 		buf.WriteString("\nWHAT THE EVIDENCE REPORTS\n\n")
@@ -45,10 +51,22 @@ func DoctorText(w io.Writer, a, b string, findings []finding.Finding, context ..
 	last := finding.Severity("")
 	for _, f := range findings {
 		if f.Severity != last {
-			blocks = append(blocks, strings.ToUpper(string(f.Severity))+"\n")
+			// The severity heading is a line of its own with no tab, so colour
+			// is safe here: only tab-terminated cells take part in a tabwriter
+			// column, and this cell never is one.
+			heading := strings.ToUpper(string(f.Severity))
+			switch f.Severity {
+			case finding.SeverityHigh:
+				heading = st.Red(heading)
+			case finding.SeverityMedium:
+				heading = st.Yellow(heading)
+			case finding.SeverityLow:
+				heading = st.Dim(heading)
+			}
+			blocks = append(blocks, heading+"\n")
 			last = f.Severity
 		}
-		blocks = append(blocks, renderFinding(f))
+		blocks = append(blocks, renderFinding(f, st))
 	}
 	blocks = append(blocks, summaryLine(findings)+"\n")
 
@@ -73,12 +91,15 @@ func DoctorText(w io.Writer, a, b string, findings []finding.Finding, context ..
 // are tab-separated so their values line up under one column, and the
 // description has no tab, which terminates that block in the tabwriter exactly
 // the way the diff renderer separates its environment columns.
-func renderFinding(f finding.Finding) string {
+func renderFinding(f finding.Finding, st Style) string {
 	var b strings.Builder
 	if f.Key != "" {
-		fmt.Fprintf(&b, "  %s  %s\n", f.Rule, f.Key)
+		// The rule id is styled but nothing else on the line is: the line has
+		// no tab, so it is a single cell that never joins a tabwriter column
+		// and whose width cannot influence alignment.
+		fmt.Fprintf(&b, "  %s  %s\n", st.Accent(f.Rule), f.Key)
 	} else {
-		fmt.Fprintf(&b, "  %s\n", f.Rule)
+		fmt.Fprintf(&b, "  %s\n", st.Accent(f.Rule))
 	}
 	if f.Expected != "" {
 		fmt.Fprintf(&b, "    expected\t%s\n", f.Expected)

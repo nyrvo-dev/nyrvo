@@ -91,6 +91,7 @@ func unavailableReason(s capture.SectionResult) string {
 // Only differences are printed. A drift report that also listed everything
 // identical would bury the few lines that matter.
 func DiffText(w io.Writer, res *diff.Result) error {
+	st := NewStyle(w)
 	if res.Empty() {
 		var b strings.Builder
 		fmt.Fprintf(&b, "No differences between %s and %s.\n", res.A, res.B)
@@ -108,7 +109,9 @@ func DiffText(w io.Writer, res *diff.Result) error {
 	for _, d := range res.Differences {
 		if d.Component != component {
 			component = d.Component
-			fmt.Fprintf(&b, "\n%s\n\n", title(component))
+			// The component heading is a tab-free line of its own, so styling it
+			// cannot shift the value columns aligned below it.
+			fmt.Fprintf(&b, "\n%s\n\n", st.Bold(title(component)))
 		}
 		// An empty key marks a whole section one side never described. Saying so
 		// in one line avoids implying the other side observed something and

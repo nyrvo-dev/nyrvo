@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // run executes a command line in an isolated working directory so snapshots
@@ -49,7 +50,7 @@ func TestSplitFlags(t *testing.T) {
 // The documented workflow — capture two environments, then compare them — is
 // the contract this milestone exists to deliver.
 func TestCaptureDiffRoundTrip(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	if code, _, errOut := run(t, "capture", "local"); code != ExitOK {
 		t.Fatalf("capture local: exit %d, stderr: %s", code, errOut)
@@ -75,7 +76,7 @@ func TestCaptureDiffRoundTrip(t *testing.T) {
 
 // Flags must work where the documentation puts them: after the operands.
 func TestDiffJSONFlagAfterOperands(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 	mustCapture(t, "other")
 
@@ -100,7 +101,7 @@ func TestDiffJSONFlagAfterOperands(t *testing.T) {
 // With --json, stdout must carry nothing but the document, so it can be piped
 // straight into another tool.
 func TestCaptureJSONStdoutIsPureJSON(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, stderr := run(t, "capture", "local", "--json")
 	if code != ExitOK {
@@ -120,7 +121,7 @@ func TestCaptureJSONStdoutIsPureJSON(t *testing.T) {
 }
 
 func TestListReportsCapturedNames(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	if _, stdout, _ := run(t, "list"); !strings.Contains(stdout, "No snapshots yet") {
 		t.Errorf("empty store output = %q", stdout)
@@ -138,7 +139,7 @@ func TestListReportsCapturedNames(t *testing.T) {
 }
 
 func TestExitCodes(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 
 	tests := []struct {
@@ -179,6 +180,36 @@ func TestCaptureRejectsPathTraversal(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "..", "escape.json")); err == nil {
 		t.Fatal("capture wrote a file outside the snapshot directory")
 	}
+}
+
+// chdirWorkDir moves the test into a fresh working directory and cleans it up
+// tolerantly.
+//
+// It deliberately avoids t.TempDir. These tests spawn real subprocesses — git,
+// the language probes — inside the directory, and on Windows a file that a
+// just-exited process still holds, or that the virus scanner is following it
+// into, cannot be deleted. t.TempDir turns that into a test failure, which is
+// how a green suite on Unix became an intermittent red one on Windows.
+//
+// Removal is retried briefly and then given up on. A directory left behind in
+// the system temp area is the operating system's problem, not a test result:
+// failing here would report a cleanup race as a defect in Nyrvo.
+func chdirWorkDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "nyrvo-test-")
+	if err != nil {
+		t.Fatalf("create work directory: %v", err)
+	}
+	t.Cleanup(func() {
+		for range 20 {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
+	t.Chdir(dir)
+	return dir
 }
 
 func mustCapture(t *testing.T, name string) {

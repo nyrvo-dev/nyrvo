@@ -38,7 +38,7 @@ func writeWorkflow(t *testing.T, name, content string) {
 // A repository without a workflow directory is a normal state: inspect must
 // say so on stdout and still succeed.
 func TestCIInspectNoWorkflows(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, errOut := run(t, "ci", "inspect")
 	if code != ExitOK {
@@ -52,7 +52,7 @@ func TestCIInspectNoWorkflows(t *testing.T) {
 // inspect must surface the job id, the platform the runner label maps to, and
 // the version the setup action pins.
 func TestCIInspectJob(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	code, stdout, errOut := run(t, "ci", "inspect")
@@ -69,7 +69,7 @@ func TestCIInspectJob(t *testing.T) {
 // The --json form must emit a parseable array whose workflow, job and snapshot
 // fields are populated, so a downstream tool can consume CI declarations.
 func TestCIInspectJSON(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	code, stdout, errOut := run(t, "ci", "inspect", "--json")
@@ -121,7 +121,7 @@ func TestCIInspectJSON(t *testing.T) {
 // Every malformed CI command line must be a usage error (exit 2), never an
 // operational one.
 func TestCIUsageErrors(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	tests := []struct {
@@ -147,7 +147,7 @@ func TestCIUsageErrors(t *testing.T) {
 // Capturing a CI job must write the documented snapshot name so the advertised
 // `nyrvo diff local ci` works, and the store must list it.
 func TestCICaptureSavesSnapshot(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	if code, _, errOut := run(t, "ci", "capture", "test"); code != ExitOK {
@@ -169,7 +169,7 @@ func TestCICaptureSavesSnapshot(t *testing.T) {
 // A selector that matches nothing is an operational failure, and the message
 // must point at the selectors that do exist.
 func TestCICaptureUnknownJob(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	code, _, errOut := run(t, "ci", "capture", "nope")
@@ -184,7 +184,7 @@ func TestCICaptureUnknownJob(t *testing.T) {
 // A bare job id shared by two workflows must be rejected with both qualified
 // selectors named, and the qualified form must then resolve unambiguously.
 func TestCICaptureAmbiguousJob(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "a.yml", nodeWorkflow)
 	writeWorkflow(t, "b.yml", nodeWorkflow)
 
@@ -206,7 +206,7 @@ func TestCICaptureAmbiguousJob(t *testing.T) {
 // workflow file states only the variables it sets — it cannot testify to
 // absence.
 func TestCICaptureDiffRoundTrip(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	writeWorkflow(t, "ci.yml", nodeWorkflow)
 
 	if code, _, errOut := run(t, "ci", "capture", "test"); code != ExitOK {

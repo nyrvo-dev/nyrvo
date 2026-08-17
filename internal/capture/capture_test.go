@@ -249,3 +249,55 @@ func TestRunWithoutHook(t *testing.T) {
 		t.Fatalf("Run without a hook: %v", err)
 	}
 }
+
+// TestRunReportsEachSectionStartBeforeItsCollector is the counterpart of
+// TestRunReportsEachSectionBeforeTheNextCollectorRuns for the start hook. Each
+// collector asserts that its own name was announced before it ran, and that the
+// announcement arrived before the finish report for the same collector.
+func TestRunReportsEachSectionStartBeforeItsCollector(t *testing.T) {
+	var started []string
+	var finished []string
+	seen := func(name string) collector.Collector {
+		return stub{name: name, collect: func(*snapshot.Snapshot) {
+			if name == "system" {
+				return
+			}
+			if len(started) == 0 || started[len(started)-1] != name {
+				t.Errorf("%s ran before its own OnSectionStart announced it; started so far: %v", name, started)
+			}
+		}}
+	}
+
+	res, err := Run(context.Background(), []collector.Collector{
+		seen("system"), seen("git"), seen("node"),
+	}, Options{
+		Name: "local", Now: fixedClock(),
+		OnSectionStart: func(name string) { started = append(started, name) },
+		OnSection:      func(s SectionResult) { finished = append(finished, s.Collector) },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := []string{"system", "git", "node"}
+	if len(started) != len(want) {
+		t.Fatalf("started %v, want %v", started, want)
+	}
+	if len(finished) != len(want) {
+		t.Fatalf("finished %v, want %v", finished, want)
+	}
+	for i, name := range want {
+		if started[i] != name {
+			t.Errorf("started[%d] = %q, want %q", i, started[i], name)
+		}
+		if finished[i] != name {
+			t.Errorf("finished[%d] = %q, want %q", i, finished[i], name)
+		}
+		// The start hook reports the same name the Result records, so a caller
+		// that renders only the stream never disagrees with one that renders
+		// the Result.
+		if res.Sections[i].Collector != name {
+			t.Errorf("sections[%d] = %q, want %q", i, res.Sections[i].Collector, name)
+		}
+	}
+}

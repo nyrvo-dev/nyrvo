@@ -125,6 +125,15 @@ func runtimeMissingFinding(in Input, d diff.Difference) finding.Finding {
 		expected = d.B
 	}
 
+	// The side that lacks a working version may have the runtime installed but
+	// refusing to answer — the collector marks those keys unusable. Reporting
+	// that as missing repeats the untruth this rule exists to correct: the
+	// binary is on PATH, the machine has the runtime, and it is a pin that will
+	// not run. It gets its own rule so a script can tell the two apart.
+	if lacksSide.IsUnusable("runtime", d.Key) {
+		return runtimeUnusableFinding(lacksSide, d.Key, expected)
+	}
+
 	// The side that lacks the runtime may be a workflow that never mentions it.
 	// A file's silence is not proof the runner image lacks the runtime, so the
 	// wording must stay honest about what is actually known.
@@ -161,6 +170,26 @@ func runtimeMissingFinding(in Input, d diff.Difference) finding.Finding {
 		Key:            d.Key,
 		Expected:       expected,
 		Actual:         "missing",
+		Description:    description,
+		Recommendation: recommendation,
+	}
+}
+
+// runtimeUnusableFinding reports a runtime that is installed but would not
+// answer when probed, usually because the project pins a toolchain this machine
+// does not have. The tool is present, so the finding must not call it missing
+// and must not recommend installing it.
+func runtimeUnusableFinding(lacksSide *snapshot.Snapshot, key, expected string) finding.Finding {
+	description := fmt.Sprintf("%s has %s installed, but it would not report a version — a pinned toolchain the machine does not have is the usual cause.", Name(lacksSide), key)
+	recommendation := fmt.Sprintf("Install the pinned toolchain the project asks for, or change the pin; %s is installed and will not report a version until one matches.", key)
+
+	return finding.Finding{
+		Rule:           finding.RuntimeUnusable,
+		Severity:       finding.SeverityMedium,
+		Component:      diff.ComponentRuntime,
+		Key:            key,
+		Expected:       expected,
+		Actual:         "installed, not usable",
 		Description:    description,
 		Recommendation: recommendation,
 	}

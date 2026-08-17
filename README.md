@@ -333,13 +333,14 @@ so they remain owner-readable.
 
 ## Platforms
 
-Verified on Linux and macOS: CI runs the suite on both, across Go 1.25 and 1.26.
+Verified on Linux, macOS and Windows. CI runs the whole suite on all three,
+across Go 1.25 and 1.26 — no test is skipped to get a platform green, with one
+stated exception: the check that snapshot and config files carry `0600`
+permissions runs where POSIX permission bits exist. Windows has none, and
+asserting them there would claim a guarantee the platform does not offer.
 
-Nyrvo builds for Windows and is written to work there — paths are handled with
-`filepath`, and the system collector already degrades when `uname` is absent,
-which is exactly the Windows case. It has nonetheless never been *run* there, so
-it is not claimed as supported: the point of this tool is not asserting things
-nobody checked. Verifying it is tracked as work, not as a footnote.
+On Windows the kernel string is left empty, because `uname` is how Nyrvo reads
+it. OS and architecture come from the Go runtime and are always present.
 
 ## Development
 

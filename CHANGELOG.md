@@ -11,12 +11,9 @@ not.
 
 ## [Unreleased]
 
-### Added
+Nothing yet.
 
-- `SECURITY.md`: how to report a vulnerability privately, what Nyrvo already
-  refuses to do, and what is deliberately not a vulnerability.
-- Windows is verified. CI runs the whole suite on Linux, macOS and Windows,
-  across Go 1.25 and 1.26.
+## [0.1.1] — 2026-08-16
 
 ### Fixed
 
@@ -25,7 +22,15 @@ not.
   caller had cancelled — so one sluggish `docker compose version` discarded every
   other observation. Only genuine cancellation now aborts a capture.
 - The capture error names the collectors that failed instead of saying "some
-  collectors failed".
+  collectors failed", which was equally useless in a CI log and on a laptop.
+
+### Added
+
+- `SECURITY.md`: how to report a vulnerability privately, what Nyrvo already
+  refuses to do, and what is deliberately not a vulnerability.
+- Windows is verified. CI runs the whole suite on Linux, macOS and Windows,
+  across Go 1.25 and 1.26, with nothing skipped to make a platform green except
+  the POSIX permission assertion, which does not apply there.
 
 ## [0.1.0] — 2026-08-16
 
@@ -88,5 +93,6 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nyrvo-dev/nyrvo/releases/tag/v0.1.0

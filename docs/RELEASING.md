@@ -60,6 +60,32 @@ Reaching `1.0.0` is a decision to stop doing that, not a measure of how finished
 the tool feels. It should happen once the commands have been used by people who
 did not write them.
 
+## Changelog fragments
+
+The changelog is assembled from fragments so that concurrent pull requests
+never edit the same lines of `CHANGELOG.md`. A PR that changes behaviour adds
+one Markdown file under `.changes/unreleased/` named `<type>-<slug>.md`, where
+`<type>` is one of the Keep a Changelog section names — `added`, `changed`,
+`deprecated`, `removed`, `fixed` or `security` — and `<slug>` describes the
+change. The filename carries the type, so the file needs no front matter. Its
+body is the entry exactly as it should read in the changelog, starting with
+"- " and wrapped at 80 columns like every entry in `CHANGELOG.md`. Two branches
+never write the same lines, because each change owns its own file.
+
+The assembler places each entry by its filename's type prefix and reads files
+in filename order within a section, so the assembled changelog is
+deterministic no matter which order the fragments were added. A fragment whose
+filename has an unknown type prefix is a typo and an error: the assembler
+refuses to run rather than silently dropping an entry from the release.
+
+`tools/changelog.sh` is the assembler. It is a maintainer command run by hand
+at release time and is never run by CI. `tools/changelog.sh preview` prints the
+sections the next release will contain without changing anything;
+`tools/changelog.sh release <version> <date>` splices them into `CHANGELOG.md`
+under a new `## [<version>] — <date>` heading and deletes the consumed
+fragments. It deliberately leaves the link definitions at the bottom of
+`CHANGELOG.md` alone; that block is edited by hand.
+
 ## Cutting a release
 
 1. `make check` — tests, race detector, vet, gofmt, golangci-lint. It must be
@@ -92,8 +118,12 @@ did not write them.
 4. Run the commands the README documents against a real repository. Every
    serious defect this project has found was found this way and none were found
    by reading a diff.
-5. Move `[Unreleased]` in `CHANGELOG.md` into a version section with today's
-   date, and update the link definitions at the bottom.
+5. Assemble the changelog from the fragments:
+   `tools/changelog.sh release vX.Y.Z <date>` writes the unreleased entries
+   into a new `## [vX.Y.Z] — <date>` section and deletes the fragments. Then
+   update the link definitions at the bottom by hand: add the `[vX.Y.Z]` link
+   and repoint `[Unreleased]` at the new tag. The script deliberately leaves
+   that block alone.
 6. Commit the changelog: `docs: release vX.Y.Z`.
 7. Tag and push:
 

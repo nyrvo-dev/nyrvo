@@ -10,6 +10,7 @@ package diff
 import (
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
@@ -75,6 +76,11 @@ type Result struct {
 	// be incomplete, so variables absent from it were not compared. Consumers
 	// must surface this: the comparison is narrower than it looks.
 	PartialEnvironment bool `json:"partial_environment,omitempty"`
+	// Unmeasured reports that a side attempted an observation and could not
+	// complete it, so those keys were not compared. Unlike the two above, which
+	// describe a source that never claimed to be exhaustive, this one describes
+	// a probe that was supposed to answer and did not.
+	Unmeasured bool `json:"unmeasured,omitempty"`
 }
 
 // Empty reports whether the two environments are semantically identical.
@@ -131,6 +137,7 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 	if partialRuntimes(a) || partialRuntimes(b) {
 		res.PartialRuntimes = true
 	}
+	dropUnmeasured(res, a, b)
 
 	sort.SliceStable(res.Differences, func(i, j int) bool {
 		di, dj := res.Differences[i], res.Differences[j]
@@ -149,6 +156,79 @@ type report struct {
 	// a reports observations found only in the first snapshot, b only in the
 	// second.
 	a, b bool
+}
+
+// dropUnmeasured removes differences about keys a side attempted and could not
+// read, and records that the comparison was narrowed.
+//
+// A key is dropped whatever the difference looks like, not only when it reads as
+// an absence. An unread probe leaves no value at all, so the side that failed
+// carries either no key — which compares as "missing" — or the zero value its
+// field type forced on it, which is worse: docker's daemon_running is a bool, so
+// a probe that ran out of time records a confident "false" that is
+// indistinguishable from an observation. Neither is worth comparing.
+//
+// This runs after the sections are compared rather than inside them because
+// there is nothing section-specific about it: every component addresses its
+// observations by key, so one pass over the differences covers the ones that
+// exist today and any added later.
+func dropUnmeasured(res *Result, a, b *snapshot.Snapshot) {
+	ua, ub := unmeasuredKeys(a), unmeasuredKeys(b)
+	if len(ua) == 0 && len(ub) == 0 {
+		return
+	}
+	// Set from the snapshots rather than from what was dropped. A reader has to
+	// be told the comparison could not cover everything even when the unread
+	// key happened to match, exactly as a partial environment is announced
+	// whether or not it hid a difference.
+	res.Unmeasured = true
+
+	kept := res.Differences[:0]
+	for _, d := range res.Differences {
+		// A whole-section difference carries no key: it says one side never
+		// described this component at all. That side's section can be empty
+		// precisely because nothing answered — a docker probe that ran out of
+		// time leaves no section rather than an incomplete one — so the silent
+		// side is asked whether it failed to read anything here.
+		if d.Key == "" {
+			silent := ub
+			if d.Kind == KindOnlyInB {
+				silent = ua
+			}
+			if silentAbout(silent, d.Component) {
+				continue
+			}
+			kept = append(kept, d)
+			continue
+		}
+		if ua[d.Component+"."+d.Key] || ub[d.Component+"."+d.Key] {
+			continue
+		}
+		kept = append(kept, d)
+	}
+	res.Differences = kept
+}
+
+func unmeasuredKeys(s *snapshot.Snapshot) map[string]bool {
+	if s == nil || len(s.Unmeasured) == 0 {
+		return nil
+	}
+	keys := make(map[string]bool, len(s.Unmeasured))
+	for _, k := range s.Unmeasured {
+		keys[k] = true
+	}
+	return keys
+}
+
+// silentAbout reports whether a side failed to read anything in a component,
+// which is what makes its empty section unusable as evidence of absence.
+func silentAbout(keys map[string]bool, component string) bool {
+	for k := range keys {
+		if strings.HasPrefix(k, component+".") {
+			return true
+		}
+	}
+	return false
 }
 
 // partialRuntimes reports a runtime list that cannot testify to absence. It

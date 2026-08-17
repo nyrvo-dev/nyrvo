@@ -340,3 +340,30 @@ func TestRenderersPropagateWriterError(t *testing.T) {
 		})
 	}
 }
+
+// A narrowed comparison must announce itself, whether or not it hid anything.
+// The reader is deciding whether two environments agree; silence about an
+// unread probe reads as agreement.
+func TestDiffTextUnmeasuredNote(t *testing.T) {
+	const note = "did not answer in time"
+
+	empty := &diff.Result{A: "local", B: "ci", Unmeasured: true}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, empty) }); !strings.Contains(got, note) {
+		t.Errorf("no-differences output omits the unmeasured note:\n%q", got)
+	}
+
+	withDiff := &diff.Result{
+		A: "local", B: "ci", Unmeasured: true,
+		Differences: []diff.Difference{
+			{Component: diff.ComponentSystem, Key: "os", Kind: diff.KindChanged, A: "darwin", B: "linux"},
+		},
+	}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, withDiff) }); !strings.Contains(got, note) {
+		t.Errorf("difference output omits the unmeasured note:\n%q", got)
+	}
+
+	complete := &diff.Result{A: "local", B: "other"}
+	if got := render(t, func(w io.Writer) error { return DiffText(w, complete) }); strings.Contains(got, note) {
+		t.Errorf("a complete comparison printed the unmeasured note:\n%q", got)
+	}
+}

@@ -40,6 +40,11 @@ func TestHelperProcess(t *testing.T) {
 		// shell would print them verbatim.
 		_, _ = fmt.Fprintln(os.Stdout, strings.Join(args[1:], " "))
 		os.Exit(0)
+	case args[0] == "sleep":
+		// Outlives any probe deadline, so a timeout test measures the deadline
+		// rather than racing a sleep that might finish first.
+		time.Sleep(time.Minute)
+		os.Exit(0)
 	case args[0] == "fail":
 		// Print one line to stderr and exit non-zero.
 		_, _ = fmt.Fprintln(os.Stderr, args[1])
@@ -159,5 +164,50 @@ func TestLookPath(t *testing.T) {
 
 	if _, err := LookPath("nyrvo-no-such-binary-9f3k2z"); !errors.Is(err, ErrUnavailable) {
 		t.Errorf("LookPath(missing) = %v, want it to wrap ErrUnavailable", err)
+	}
+}
+
+// A probe that outlives its deadline must be reported as having run out of
+// time, not as a tool that is missing. Everything downstream keys off that
+// distinction: a runtime marked absent when it is merely slow makes two
+// captures of one machine disagree.
+func TestRunOutputReportsATimeoutAsATimeout(t *testing.T) {
+	restore := DefaultTimeout
+	DefaultTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { DefaultTimeout = restore })
+
+	_, _, err := RunOutput(context.Background(), os.Args[0], helperProcessArgs(t, "sleep")...)
+	if err == nil {
+		t.Fatal("RunOutput returned no error for a probe that never finished")
+	}
+	if !IsTimeout(err) {
+		t.Errorf("IsTimeout(%v) = false, want true", err)
+	}
+	// The two must never be confused: ErrUnavailable is what makes a collector
+	// record a tool as absent.
+	if errors.Is(err, ErrUnavailable) {
+		t.Errorf("a slow probe was reported as unavailable: %v", err)
+	}
+}
+
+func TestIsTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"deadline", context.DeadlineExceeded, true},
+		{"wrapped deadline", fmt.Errorf("npm --version: %w", context.DeadlineExceeded), true},
+		{"unavailable", ErrUnavailable, false},
+		// Cancellation is the caller's own doing and is handled before any
+		// collector asks this question; it must not read as a slow tool.
+		{"cancelled", context.Canceled, false},
+		{"exit status", errors.New("exit status 1"), false},
+	}
+	for _, tt := range tests {
+		if got := IsTimeout(tt.err); got != tt.want {
+			t.Errorf("IsTimeout(%v) = %v, want %v", tt.err, got, tt.want)
+		}
 	}
 }

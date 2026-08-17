@@ -3,6 +3,7 @@ package snapshot
 import (
 	"bytes"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,34 @@ func TestMarshalIndependentOfAppendOrder(t *testing.T) {
 	}
 	if !bytes.Equal(ab, bb) {
 		t.Fatalf("Marshal() order-dependent:\na: %s\nb: %s", ab, bb)
+	}
+}
+
+// Two captures of one machine must produce byte-identical documents, and a
+// runtime with several probes can name the same key twice.
+func TestNormalizeSortsAndDeduplicatesUnmeasured(t *testing.T) {
+	s := New("local", time.Time{})
+	s.MarkUnmeasured("runtime", "python")
+	s.MarkUnmeasured("docker", "compose_version")
+	s.MarkUnmeasured("runtime", "python")
+
+	s.Normalize()
+
+	want := []string{"docker.compose_version", "runtime.python"}
+	if !slices.Equal(s.Unmeasured, want) {
+		t.Errorf("Unmeasured = %v, want %v", s.Unmeasured, want)
+	}
+}
+
+// The field is additive and optional, so a snapshot that measured everything
+// must serialise exactly as it did before this field existed.
+func TestUnmeasuredIsOmittedWhenEverythingWasMeasured(t *testing.T) {
+	s := New("local", time.Time{})
+	data, err := Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "unmeasured") {
+		t.Errorf("a complete snapshot carries an unmeasured key:\n%s", data)
 	}
 }

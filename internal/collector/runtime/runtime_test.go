@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	// Aliased because this package is itself called runtime, and its doc says
 	// the standard library one is never imported unqualified here.
 	goruntime "runtime"
@@ -292,4 +293,71 @@ func TestNPMIsCollectedSoItsRequirementCanBeJudged(t *testing.T) {
 	if got := NPM().Name(); got != "npm" {
 		t.Fatalf("NPM().Name() = %q, want the name engines.npm is recorded under", got)
 	}
+}
+
+// The defect this guards against was found on a cold windows-latest runner:
+// `npm --version` took longer than the probe deadline, npm was recorded as
+// absent, and a second capture of the same machine a moment later found it. The
+// two snapshots then disagreed about a machine that had not changed.
+//
+// A probe that runs out of time proves nothing about the runtime. LookPath
+// already found the binary, so it is installed; only its version is unknown.
+func TestProbeThatRunsOutOfTimeIsUnmeasuredNotAbsent(t *testing.T) {
+	restore := collector.DefaultTimeout
+	collector.DefaultTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { collector.DefaultTimeout = restore })
+
+	dir := fakeSleepingProbe(t, "nyrvo-slow")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	c := newCollector("slowlang", probe{binary: "nyrvo-slow", args: []string{"--version"}})
+	snap := snapshot.New("local", time.Time{})
+	err := c.Collect(context.Background(), snap)
+
+	// Still unavailable to the capture engine: there is no version to record, so
+	// the section is genuinely empty and the capture must not fail over it.
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if len(snap.Runtimes) != 0 {
+		t.Errorf("a runtime that never answered was recorded with a version: %+v", snap.Runtimes)
+	}
+	// The part that matters: the snapshot says the answer is unknown rather than
+	// letting silence be read as absence.
+	if got, want := snap.Unmeasured, []string{"runtime.slowlang"}; !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+}
+
+// A runtime that is simply not installed must not be marked unmeasured: that
+// would suppress a real difference, which is the opposite failure and just as
+// wrong.
+func TestAbsentRuntimeIsNotMarkedUnmeasured(t *testing.T) {
+	c := newCollector("nyrvo-absent", probe{binary: "nyrvo-definitely-absent", args: []string{"--version"}})
+	snap := snapshot.New("local", time.Time{})
+	if err := c.Collect(context.Background(), snap); !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("an absent runtime was marked unmeasured: %v", snap.Unmeasured)
+	}
+}
+
+// fakeSleepingProbe builds a binary that outlives the probe deadline.
+func fakeSleepingProbe(t *testing.T, binary string) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	source := "package main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n"
+	if err := os.WriteFile(src, []byte(source), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	out := filepath.Join(dir, binary)
+	if goruntime.GOOS == "windows" {
+		out += ".exe"
+	}
+	if b, err := exec.Command("go", "build", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("build sleeping probe: %v: %s", err, b)
+	}
+	return dir
 }

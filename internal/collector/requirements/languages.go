@@ -7,6 +7,51 @@ import (
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
 
+// globalJSONReqs reads the SDK version a .NET project pins in global.json.
+//
+// sdk.version is the version of the SDK the .NET muxer must select. It is a
+// floor, not a pin: the resolver rolls forward to a newer SDK whenever the
+// exact one is missing. With no rollForward key the default policy is "patch",
+// which accepts the latest installed patch of the same feature band, and every
+// other policy accepts a newer SDK in some scope. Recording it as a pin
+// reproduces the go directive mistake — every machine with a slightly newer SDK
+// than the file names reports itself broken, which is the normal arrangement.
+//
+// rollForward: "disable" is the one value that forbids rolling forward: the
+// muxer demands the exact SDK and the build genuinely fails without it, so that
+// spelling is recorded as a pin. Every other value, including ones Nyrvo has
+// not seen yet, stays a floor — never convicting a machine that might build.
+func globalJSONReqs(dir string) []snapshot.Requirement {
+	body, ok := readSource(dir, "global.json")
+	if !ok {
+		return nil
+	}
+	// Decoded into a struct holding exactly the fields Nyrvo reads, like every
+	// other JSON source: the file is untrusted repository input.
+	var gj struct {
+		SDK struct {
+			Version     string `json:"version"`
+			RollForward string `json:"rollForward"`
+		} `json:"sdk"`
+	}
+	if err := json.Unmarshal(body, &gj); err != nil {
+		// A malformed global.json costs this one source, never the capture.
+		return nil
+	}
+	version := strings.TrimSpace(gj.SDK.Version)
+	if version == "" {
+		// An sdk block without a version pins nothing: the muxer then uses the
+		// highest installed SDK, which is no constraint at all.
+		return nil
+	}
+	return []snapshot.Requirement{{
+		Runtime:    "dotnet",
+		Constraint: version,
+		Source:     "global.json sdk.version",
+		Minimum:    strings.TrimSpace(gj.SDK.RollForward) != "disable",
+	}}
+}
+
 // rubyVersionReqs drops ruby-'s selector syntax because runtime observations
 // contain only the version that selector resolves to.
 func rubyVersionReqs(dir string) []snapshot.Requirement {

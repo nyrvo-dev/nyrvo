@@ -36,6 +36,7 @@ func TestNormalizeVersion(t *testing.T) {
 		{"python label", "Python 3.13.3", "3.13.3", false},
 		{"short go version", "go1.22", "1.22", false},
 		{"release candidate", "Python 3.11.9rc1", "3.11.9", false},
+		{"bare dotnet version", "9.0.100", "9.0.100", false},
 		{"empty output", "", "", true},
 		{"garbage", "abc", "", true},
 		{"bare v", "v", "", true},
@@ -139,6 +140,39 @@ func TestCollectPreservesExistingRuntimes(t *testing.T) {
 	}
 }
 
+// The dotnet probe must read a bare SDK version. The real binary may not exist
+// on the test machine, so a fake answers for it; the collector itself is what
+// is under test, and it must ask exactly for --version.
+func TestCollectDotNet(t *testing.T) {
+	dir := fakeProbe(t, "dotnet", "9.0.100\n", "", 0)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := &snapshot.Snapshot{}
+	c := DotNet()
+
+	if got := c.Name(); got != "dotnet" {
+		t.Fatalf("Name() = %q, want %q", got, "dotnet")
+	}
+	if err := c.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("DotNet().Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 {
+		t.Fatalf("got %d runtimes, want 1", len(snap.Runtimes))
+	}
+	rt := snap.Runtimes[0]
+	if rt.Name != "dotnet" {
+		t.Fatalf("Runtime.Name = %q, want %q", rt.Name, "dotnet")
+	}
+	// A bare "9.0.100" is the whole answer: the SDK version the muxer reports,
+	// which is what a global.json requirement will be judged against.
+	if rt.Version != "9.0.100" {
+		t.Fatalf("Runtime.Version = %q, want %q", rt.Version, "9.0.100")
+	}
+	if rt.Path == "" {
+		t.Error("Runtime.Path is empty, want a path from LookPath")
+	}
+}
+
 func TestJavaProbesBothSpellingsAndAsksForStderrOnlyWhereItAnswers(t *testing.T) {
 	c, ok := Java().(*runtimeCollector)
 	if !ok {
@@ -239,7 +273,7 @@ func TestEveryRuntimeHasADistinctName(t *testing.T) {
 	// The name is the diff key and the string a requirement matches on. Two
 	// collectors sharing one would silently overwrite each other's observation.
 	seen := map[string]bool{}
-	for _, c := range []collector.Collector{Go(), Node(), Python(), Ruby(), PHP(), Rust(), Java()} {
+	for _, c := range []collector.Collector{Go(), Node(), NPM(), Python(), Ruby(), PHP(), Rust(), Java(), DotNet()} {
 		if seen[c.Name()] {
 			t.Fatalf("two runtime collectors are both named %q", c.Name())
 		}

@@ -75,6 +75,7 @@ func (r Requirements) Collect(_ context.Context, snap *snapshot.Snapshot) error 
 	reqs = append(reqs, composerJSONReqs(dir)...)
 	reqs = append(reqs, rustReqs(dir)...)
 	reqs = append(reqs, javaVersionReqs(dir)...)
+	reqs = append(reqs, globalJSONReqs(dir)...)
 
 	if len(reqs) == 0 {
 		return fmt.Errorf("no requirement sources in %s: %w", dir, collector.ErrUnavailable)

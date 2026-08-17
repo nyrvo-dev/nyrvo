@@ -170,6 +170,7 @@ func TestSnapshotSetupActions(t *testing.T) {
 		{name: "node case-insensitive", uses: "Actions/Setup-Node@v4", with: map[string]string{"node-version": "22.2.0"}, runtime: "node", version: "22.2.0"},
 		{name: "python", uses: "actions/setup-python@v5", with: map[string]string{"python-version": "3.13.1"}, runtime: "python", version: "3.13.1"},
 		{name: "go", uses: "actions/setup-go@v5", with: map[string]string{"go-version": "1.22.4"}, runtime: "go", version: "1.22.4"},
+		{name: "dotnet", uses: "actions/setup-dotnet@v4", with: map[string]string{"dotnet-version": "9.0.100"}, runtime: "dotnet", version: "9.0.100"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -223,6 +224,10 @@ func TestSnapshotSetupVersionFile(t *testing.T) {
 		{"actions/setup-node@v4", "node-version-file", ".nvmrc"},
 		{"actions/setup-python@v5", "python-version-file", ".python-version"},
 		{"actions/setup-go@v5", "go-version-file", "go.mod"},
+		// setup-dotnet names its version file after the file itself rather than
+		// after the runtime, so this is the case that would break a mapping that
+		// assumed "<runtime>-version-file".
+		{"actions/setup-dotnet@v4", "global-json-file", "global.json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {

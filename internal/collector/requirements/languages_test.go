@@ -15,6 +15,7 @@ func TestLanguageReadersAbsent(t *testing.T) {
 		"Composer":     composerJSONReqs,
 		"Rust":         rustReqs,
 		"Java":         javaVersionReqs,
+		"global.json":  globalJSONReqs,
 	}
 	for name, reader := range readers {
 		t.Run(name, func(t *testing.T) {
@@ -155,6 +156,73 @@ func TestJavaVersionReqs(t *testing.T) {
 	if got := javaVersionReqs(dir); !reflect.DeepEqual(got, want) {
 		t.Fatalf("javaVersionReqs() = %v, want %v", got, want)
 	}
+}
+
+func TestGlobalJSONReqs(t *testing.T) {
+	t.Run("version is a floor", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"sdk":{"version":"9.0.100","rollForward":"latestFeature"}}`)
+
+		want := []snapshot.Requirement{{
+			Runtime:    "dotnet",
+			Constraint: "9.0.100",
+			Source:     "global.json sdk.version",
+			Minimum:    true,
+		}}
+		if got := globalJSONReqs(dir); !reflect.DeepEqual(got, want) {
+			t.Fatalf("globalJSONReqs() = %v, want %v", got, want)
+		}
+	})
+	t.Run("default rollForward is still a floor", func(t *testing.T) {
+		// With no rollForward key the resolver uses the "patch" policy, which
+		// accepts a newer patch of the same feature band, so a newer SDK on the
+		// machine still builds this project.
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"sdk":{"version":"9.0.100"}}`)
+
+		if got := globalJSONReqs(dir); len(got) != 1 || !got[0].Minimum {
+			t.Fatalf("globalJSONReqs() = %v, want one floor requirement", got)
+		}
+	})
+	t.Run("rollForward disable is a pin", func(t *testing.T) {
+		// disable forbids rolling forward: the muxer demands the exact SDK and
+		// a machine with any other version genuinely cannot build the project.
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"sdk":{"version":"8.0.302","rollForward":"disable"}}`)
+
+		want := []snapshot.Requirement{{
+			Runtime:    "dotnet",
+			Constraint: "8.0.302",
+			Source:     "global.json sdk.version",
+		}}
+		if got := globalJSONReqs(dir); !reflect.DeepEqual(got, want) {
+			t.Fatalf("globalJSONReqs() = %v, want %v", got, want)
+		}
+	})
+}
+
+func TestGlobalJSONReqsMalformedOrWithoutSDKVersion(t *testing.T) {
+	t.Run("malformed JSON", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"sdk":{"version":`)
+		if got := globalJSONReqs(dir); got != nil {
+			t.Fatalf("globalJSONReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("no sdk key", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"msbuild-sdks":{"Foo":"1.0.0"}}`)
+		if got := globalJSONReqs(dir); got != nil {
+			t.Fatalf("globalJSONReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("sdk without version", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "global.json", `{"sdk":{"rollForward":"latestMinor"}}`)
+		if got := globalJSONReqs(dir); got != nil {
+			t.Fatalf("globalJSONReqs() = %v, want nil", got)
+		}
+	})
 }
 
 func TestExtraToolVersionAliases(t *testing.T) {

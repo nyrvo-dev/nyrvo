@@ -196,3 +196,56 @@ func TestRunRecordsThatTheSnapshotWasObservedLocally(t *testing.T) {
 		t.Fatalf("source = %+v, want kind %q", res.Snapshot.Source, snapshot.SourceLocal)
 	}
 }
+
+// TestRunReportsEachSectionBeforeTheNextCollectorRuns is the whole point of the
+// hook. A capture spawns a dozen external tools, and a hook that only delivered
+// its sections once every one of them had answered would render exactly the
+// silence it exists to remove: each collector asserts that its own predecessor
+// was already reported by the time it started.
+func TestRunReportsEachSectionBeforeTheNextCollectorRuns(t *testing.T) {
+	var delivered []string
+	seen := func(name string) collector.Collector {
+		return stub{name: name, collect: func(*snapshot.Snapshot) {
+			if name == "system" {
+				return
+			}
+			if len(delivered) == 0 {
+				t.Errorf("%s started before any section was reported", name)
+			}
+		}}
+	}
+
+	res, err := Run(context.Background(), []collector.Collector{
+		seen("system"), seen("git"), seen("node"),
+	}, Options{
+		Name: "local", Now: fixedClock(),
+		OnSection: func(s SectionResult) { delivered = append(delivered, s.Collector) },
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	want := []string{"system", "git", "node"}
+	if len(delivered) != len(want) {
+		t.Fatalf("delivered %v, want %v", delivered, want)
+	}
+	for i, name := range want {
+		if delivered[i] != name {
+			t.Errorf("delivered[%d] = %q, want %q", i, delivered[i], name)
+		}
+		// The hook reports what the Result records, so a caller that renders
+		// only the stream never disagrees with one that renders the Result.
+		if res.Sections[i].Collector != name {
+			t.Errorf("sections[%d] = %q, want %q", i, res.Sections[i].Collector, name)
+		}
+	}
+}
+
+// A nil hook is the normal case for every caller that does not render progress.
+func TestRunWithoutHook(t *testing.T) {
+	if _, err := Run(context.Background(), []collector.Collector{stub{name: "system"}}, Options{
+		Name: "local", Now: fixedClock(),
+	}); err != nil {
+		t.Fatalf("Run without a hook: %v", err)
+	}
+}

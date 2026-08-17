@@ -71,6 +71,15 @@ type Options struct {
 	// Now supplies the capture timestamp; tests inject a fixed clock so golden
 	// output stays stable.
 	Now func() time.Time
+	// OnSection is called as each collector finishes, before the next one
+	// starts. Run still returns every section in the Result; this exists only so
+	// a caller can report progress while the capture is happening. A capture
+	// spawns a dozen external tools and takes seconds, and without this the
+	// terminal stays silent until all of them have answered.
+	//
+	// Capture does not print. It hands the section up and lets the caller decide
+	// whether anything is rendered at all.
+	OnSection func(SectionResult)
 }
 
 // Run executes collectors in order and returns the assembled snapshot.
@@ -119,6 +128,9 @@ func Run(ctx context.Context, collectors []collector.Collector, opts Options) (*
 			section.Error = err.Error()
 		}
 		result.Sections = append(result.Sections, section)
+		if opts.OnSection != nil {
+			opts.OnSection(section)
+		}
 	}
 
 	snap.Normalize()

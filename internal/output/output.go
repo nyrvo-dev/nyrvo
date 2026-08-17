@@ -32,34 +32,45 @@ func JSON(w io.Writer, v any) error {
 	return nil
 }
 
-// CaptureText reports what each collector observed.
+// CaptureHeader announces that a capture is starting.
+//
+// It is written before the collectors run, not after: the line says what is
+// about to happen, and printing it alongside the finished result made it a
+// report of work already done.
+func CaptureHeader(w io.Writer) error {
+	_, err := io.WriteString(w, "Capturing environment...\n\n")
+	return err
+}
+
+// CaptureSection reports what one collector observed, as a single line.
+//
+// Written as each collector finishes rather than gathered and printed at the
+// end, so the terminal shows progress through a run that spawns a dozen
+// external tools.
 //
 // Unavailable sections are shown rather than hidden: "Python not installed" is
 // itself a fact about this environment, and silently omitting it would leave
 // the user guessing whether Nyrvo looked at all.
-func CaptureText(w io.Writer, res *capture.Result) error {
-	var b strings.Builder
-	b.WriteString("Capturing environment...\n\n")
-	for _, s := range res.Sections {
-		switch s.Status {
-		case capture.StatusOK:
-			fmt.Fprintf(&b, "  ok        %s\n", s.Collector)
-		case capture.StatusUnavailable:
-			// "Not available" covers two very different situations: nothing is
-			// installed, and something is installed but refused to answer —
-			// rustc under a toolchain the machine does not have, rbenv on a
-			// version that was never installed. The second is often the drift
-			// the user is capturing to find, so its reason is printed.
-			if reason := unavailableReason(s); reason != "" {
-				fmt.Fprintf(&b, "  skipped   %s (%s)\n", s.Collector, reason)
-				continue
-			}
-			fmt.Fprintf(&b, "  skipped   %s (not available here)\n", s.Collector)
-		default:
-			fmt.Fprintf(&b, "  FAILED    %s: %s\n", s.Collector, s.Error)
+func CaptureSection(w io.Writer, s capture.SectionResult) error {
+	var line string
+	switch s.Status {
+	case capture.StatusOK:
+		line = fmt.Sprintf("  ok        %s\n", s.Collector)
+	case capture.StatusUnavailable:
+		// "Not available" covers two very different situations: nothing is
+		// installed, and something is installed but refused to answer — rustc
+		// under a toolchain the machine does not have, rbenv on a version that
+		// was never installed. The second is often the drift the user is
+		// capturing to find, so its reason is printed.
+		if reason := unavailableReason(s); reason != "" {
+			line = fmt.Sprintf("  skipped   %s (%s)\n", s.Collector, reason)
+			break
 		}
+		line = fmt.Sprintf("  skipped   %s (not available here)\n", s.Collector)
+	default:
+		line = fmt.Sprintf("  FAILED    %s: %s\n", s.Collector, s.Error)
 	}
-	_, err := io.WriteString(w, b.String())
+	_, err := io.WriteString(w, line)
 	return err
 }
 

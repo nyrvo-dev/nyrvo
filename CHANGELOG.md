@@ -11,7 +11,14 @@ not.
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- `nyrvo capture` reports each collector as it finishes instead of printing the
+  whole list once the run is over. A capture spawns a dozen external tools and
+  takes seconds; until now the terminal stayed silent for all of it and then
+  printed "Capturing environment..." above work that had already happened. The
+  lines themselves are unchanged, so anything reading that output still reads
+  the same bytes.
 
 ## [0.1.1] — 2026-08-16
 

@@ -23,6 +23,23 @@ These are decisions, not omissions, and each has an ADR in `docs/adr`:
 A change that crosses one of these needs its own ADR arguing the reversal, not a
 flag that quietly opts out of it.
 
+## Working with an AI assistant
+
+Nyrvo is written with model assistance under human review — the README says so
+plainly, and a pull request written the same way is welcome on the same terms as
+any other.
+
+Those terms do not change. Comments explain why. Every commit builds and tests
+on its own. A change that touches behaviour comes with a check that fails if the
+behaviour breaks. And the one that matters most here: **run it against real
+data before proposing it.** Every serious defect this project has found came
+from running the tool, never from reading a diff, and generated code is
+especially convincing to read and unreliable until it has been executed.
+
+There is no requirement to add a `Co-Authored-By` trailer. If nearly every
+commit carried one it would stop distinguishing anything, which is the opposite
+of disclosure.
+
 ## Comments
 
 Comments say **why**, never what. A comment that restates the code it sits on

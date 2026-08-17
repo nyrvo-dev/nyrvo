@@ -13,6 +13,78 @@ not.
 
 Entries for the next release live in `.changes/unreleased/`; see docs/RELEASING.md.
 
+## [0.2.0] — 2026-08-17
+
+### Added
+
+- `nyrvo capture` animates a spinner beside the collector it is currently
+  running, so a slow external probe no longer looks like a hang. It appears only
+  when the destination is a terminal: a pipe, a file and a CI log receive exactly
+  the bytes they received before, down to the last carriage return, and
+  `NO_COLOR`, `TERM=dumb` and the legacy Windows console all turn it off through
+  the same check that governs colour. With `--json` it follows the progress
+  stream to stderr, so the document on stdout stays parseable.
+
+- .NET is observed: `dotnet --version` is captured as the `dotnet` runtime, and
+  `global.json` is read as a requirement source. `actions/setup-dotnet` is
+  recognized in a workflow, so a .NET job's declared SDK is comparable against
+  the machine — without it the constraint could be stored but never checked.
+
+  `sdk.version` is recorded as a floor, not a pin. The .NET resolver rolls
+  forward to a newer SDK under every policy except `rollForward: "disable"`,
+  which is the one spelling recorded as a pin. Treating it as a pin everywhere
+  would report every machine with a newer SDK as broken, which is the normal
+  arrangement rather than drift.
+
+- `nyrvo doctor` and `nyrvo ci import` animate a spinner while they wait on the
+  network or on an AI agent, so a fetch that takes minutes no longer looks like
+  a hang. The label says what the wait is for — `importing run 12345`, or the
+  agent's name — and a spinner that has been running longer than two seconds
+  shows how long: `⠹ claude · 47s`. It appears only when the destination is a
+  terminal: a pipe, a file and a CI log receive exactly the bytes they received
+  before, down to the last carriage return, and the `--json` document on stdout
+  stays parseable.
+
+### Changed
+
+- `diff` and `doctor` use colour when they are writing to a terminal: bold
+  headings, the severity word in red, yellow or dim, and the rule identifier in
+  Nyrvo's purple. Nothing else is styled.
+
+  The decision is made per writer, not per process. A pipe, a file, a CI log and
+  a test all get exactly the bytes they got before, so anything parsing that
+  output is unaffected. `NO_COLOR` and `TERM=dumb` disable it, and on Windows
+  colour is offered only to terminals known to interpret escape sequences.
+
+  Only lines that carry no tab are ever styled: the aligned columns are laid out
+  by `text/tabwriter`, which counts raw bytes rather than display width, so an
+  escape sequence on one of those lines would silently shift every column.
+
+- A runtime that is installed but refuses to report a version now reports
+  `runtime.unusable` where it previously reported `runtime.missing`. Rule
+  identifiers are part of the contract, so this is called out rather than filed
+  as a fix: a script filtering on `runtime.missing` will see fewer findings, and
+  one filtering on the new identifier sees them instead. The old identifier is
+  unchanged in meaning and still reports a runtime that is genuinely absent.
+
+### Fixed
+
+- A runtime that is installed but will not report a version is no longer
+  reported as a runtime that is missing. A project pinning a toolchain the
+  machine does not have — a `global.json` naming an SDK that is not installed, a
+  `rust-toolchain.toml` naming an unknown toolchain, an rbenv version with no
+  matching install — makes `dotnet --version`, `rustc --version` and
+  `ruby --version` exit without answering, even though the binary is on PATH and
+  the runtime is genuinely there. `doctor` said "ci has dotnet installed, but
+  local does not" about a machine carrying .NET, and recommended installing it;
+  it now reports `runtime.unusable`, says the runtime is installed but would not
+  report a version, and points at the pin.
+
+  Snapshots record such runtimes in `unusable` as `component.key` only, never
+  the tool's error text: the real messages embed the user's absolute paths, and
+  a snapshot is pasted into bug reports. Unlike `unmeasured`, a refusal is
+  deterministic and is reported rather than skipped.
+
 ## [0.1.2] — 2026-08-17
 
 ### Fixed
@@ -126,7 +198,8 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nyrvo-dev/nyrvo/releases/tag/v0.1.0

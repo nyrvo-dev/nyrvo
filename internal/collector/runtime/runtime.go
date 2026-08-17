@@ -192,6 +192,15 @@ func NPM() collector.Collector {
 	return newCollector("npm", probe{binary: "npm", args: []string{"--version"}})
 }
 
+// DotNet returns a collector for the .NET SDK.
+//
+// dotnet --version reports the SDK version — "9.0.100", not the runtime's
+// "9.0.1" — and that is exactly what a project's global.json sdk.version
+// constrains, so the observation lines up with the requirement read against it.
+func DotNet() collector.Collector {
+	return newCollector("dotnet", probe{binary: "dotnet", args: []string{"--version"}})
+}
+
 // Ruby returns a collector for the Ruby runtime.
 func Ruby() collector.Collector {
 	return newCollector("ruby", probe{binary: "ruby", args: []string{"--version"}})

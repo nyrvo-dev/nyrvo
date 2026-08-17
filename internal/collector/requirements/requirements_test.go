@@ -286,6 +286,32 @@ func TestCollectTwiceDoesNotDuplicate(t *testing.T) {
 	}
 }
 
+func TestGlobalJSONSDKVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "global.json", `{
+  "sdk": {
+    "version": "9.0.100",
+    "rollForward": "latestMinor"
+  }
+}`)
+
+	snap, err := collect(t, dir)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	// The runtime name must equal the diff key the collector probes under, or
+	// the requirement can never be matched to an observation.
+	want := []snapshot.Requirement{{
+		Runtime:    "dotnet",
+		Constraint: "9.0.100",
+		Source:     "global.json sdk.version",
+		Minimum:    true,
+	}}
+	if !reflect.DeepEqual(snap.Requirements, want) {
+		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)
+	}
+}
+
 func TestCommentsAndBlankLinesSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, ".nvmrc", "\n# pinned via asdf\n\nv20.11.1\n")

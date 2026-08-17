@@ -145,6 +145,10 @@ var setupActions = []setupAction{
 	{path: "actions/setup-python", runtime: "python", version: "python-version", file: "python-version-file"},
 	{path: "actions/setup-go", runtime: "go", version: "go-version", file: "go-version-file"},
 	{path: "actions/setup-java", runtime: "java", version: "java-version", file: "java-version-file"},
+	// setup-dotnet spells its version-file input "global-json-file" rather than
+	// "dotnet-version-file", which is why the file key is named separately from
+	// the runtime rather than derived from it.
+	{path: "actions/setup-dotnet", runtime: "dotnet", version: "dotnet-version", file: "global-json-file"},
 	// The Ruby, PHP and Rust actions are the community ones every workflow uses;
 	// GitHub publishes no first-party equivalent, so matching only actions/* here
 	// would leave those ecosystems unreadable.

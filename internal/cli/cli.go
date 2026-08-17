@@ -164,6 +164,7 @@ func defaultCollectors() []collector.Collector {
 		runtime.PHP(),
 		runtime.Rust(),
 		runtime.Java(),
+		runtime.DotNet(),
 		&docker.Docker{},
 		// Requirements reads the checked-out project, not the machine, so it
 		// runs from the working directory like the git collector does.

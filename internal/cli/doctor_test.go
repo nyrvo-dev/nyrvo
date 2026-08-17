@@ -16,7 +16,7 @@ import (
 // anything. "snapshot not found" alone would leave them guessing, so the error
 // has to name the command that fixes it.
 func TestDoctorMissingSnapshotsExplainHowToCreateThem(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, _, errOut := run(t, "doctor")
 	if code != ExitError {
@@ -45,7 +45,7 @@ func TestDoctorMissingSnapshotsExplainHowToCreateThem(t *testing.T) {
 // matched rather than claiming the environments are equivalent — Nyrvo's rule
 // set is small and the output must not imply coverage it does not have.
 func TestDoctorCleanRunIsHonest(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 	mustCapture(t, "other")
 
@@ -62,7 +62,7 @@ func TestDoctorCleanRunIsHonest(t *testing.T) {
 // still exit 0, or every CI job running doctor would go red on a low-severity
 // note.
 func TestDoctorExitsZeroWithFindings(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	// Two captures of one machine are identical, so the old version of this test
 	// had no findings to exit zero despite — it asserted its own name and proved
 	// nothing. These two differ by construction.
@@ -79,7 +79,7 @@ func TestDoctorExitsZeroWithFindings(t *testing.T) {
 }
 
 func TestDoctorJSON(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 	mustCapture(t, "other")
 
@@ -112,7 +112,7 @@ func TestDoctorJSON(t *testing.T) {
 }
 
 func TestDoctorUsageErrors(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 
 	tests := []struct {
@@ -152,7 +152,7 @@ func TestDoctorImportsRunAndDiagnoses(t *testing.T) {
 		logDoc:  readLogFixture(t, "log-failure.txt"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, errOut := run(t, "doctor", "31921289286")
 	if code != ExitOK {
@@ -192,7 +192,7 @@ func TestDoctorRunJSONCarriesContext(t *testing.T) {
 		logDoc:  readLogFixture(t, "log-failure.txt"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, errOut := run(t, "doctor", "31921289286", "--json")
 	if code != ExitOK {
@@ -223,7 +223,7 @@ func TestDoctorRunJSONCarriesContext(t *testing.T) {
 // A single operand that is not a run reference is a mistyped command, not a
 // failed fetch: it must be answered with usage.
 func TestDoctorRejectsNonRunOperand(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	for _, arg := range []string{"local", "staging", "not-a-run"} {
 		if code, _, _ := run(t, "doctor", arg); code != ExitUsage {
 			t.Errorf("doctor %q: exit = %d, want %d", arg, code, ExitUsage)
@@ -235,7 +235,7 @@ func TestDoctorRejectsNonRunOperand(t *testing.T) {
 // error teaches the two-step route instead of reporting a run URL as an invalid
 // snapshot name.
 func TestDoctorRunPlusJobExplainsTheTwoStepRoute(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	code, _, errOut := run(t, "doctor", "https://github.com/cli/cli/actions/runs/1", "some job")
 	if code != ExitUsage {
 		t.Fatalf("exit = %d, want %d", code, ExitUsage)
@@ -252,7 +252,7 @@ func TestDoctorRunPlusJobExplainsTheTwoStepRoute(t *testing.T) {
 // never changes the exit code, because drift is an answer and a low-severity
 // note should not turn a pipeline red by default.
 func TestDoctorFailOn(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	// Two snapshots that differ in exactly one known way, rather than a capture
 	// of whatever machine runs the tests.
 	//
@@ -305,7 +305,7 @@ func writeSnapshotFile(t *testing.T, name string, system *snapshot.System) {
 }
 
 func TestDoctorFailOnUsage(t *testing.T) {
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 	mustCapture(t, "local")
 	mustCapture(t, "other")
 

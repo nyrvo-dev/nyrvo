@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"runtime/debug"
+	"strings"
 
 	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/collector"
@@ -217,7 +218,7 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	}
 
 	if res.Failed() {
-		return fmt.Errorf("capture saved as %q, but some collectors failed", name)
+		return fmt.Errorf("capture saved as %q, but these collectors failed: %s", name, strings.Join(res.FailedSections(), ", "))
 	}
 	return nil
 }

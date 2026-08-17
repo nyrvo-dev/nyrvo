@@ -118,6 +118,54 @@ func TestCollect(t *testing.T) {
 			},
 		},
 		{
+			// A deadline on the plugin probe is not a verdict on compose: the
+			// legacy binary is still asked before concluding it is absent.
+			name: "compose probe deadline degrades to empty version",
+			stub: map[string]fakeResult{
+				clientFormat:  {out: "29.4.0"},
+				serverFormat:  {out: "29.4.0"},
+				psFormat:      {out: ""},
+				composeShort:  {err: context.DeadlineExceeded},
+				legacyCompose: {err: fmt.Errorf("docker-compose not found: %w", collector.ErrUnavailable)},
+			},
+			want: &snapshot.Docker{
+				ClientVersion: "29.4.0",
+				ServerVersion: "29.4.0",
+				DaemonRunning: true,
+			},
+		},
+		{
+			name: "server probe deadline marks daemon not running",
+			stub: map[string]fakeResult{
+				clientFormat: {out: "29.4.0"},
+				serverFormat: {err: context.DeadlineExceeded},
+				composeShort: {out: "5.1.2"},
+			},
+			want: &snapshot.Docker{
+				ClientVersion:  "29.4.0",
+				ComposeVersion: "5.1.2",
+			},
+		},
+		{
+			// The bug the Windows runner found, in the probe most likely to hit
+			// it: the format probe talks to the daemon, so a sick daemon is
+			// exactly when it drags past the deadline.
+			name: "client probe deadline falls through to the fallback",
+			stub: map[string]fakeResult{
+				clientFormat: {err: context.DeadlineExceeded},
+				legacyClient: {out: "Docker version 29.4.0, build 9d7ad9f"},
+				serverFormat: {out: "29.4.0"},
+				psFormat:     {out: ""},
+				composeShort: {out: "5.1.2"},
+			},
+			want: &snapshot.Docker{
+				ClientVersion:  "29.4.0",
+				ServerVersion:  "29.4.0",
+				DaemonRunning:  true,
+				ComposeVersion: "5.1.2",
+			},
+		},
+		{
 			name: "docker --version fallback when the format probe fails",
 			stub: map[string]fakeResult{
 				clientFormat: {err: fmt.Errorf("docker version: boom")},

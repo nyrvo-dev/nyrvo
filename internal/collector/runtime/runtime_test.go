@@ -3,9 +3,14 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	// Aliased because this package is itself called runtime, and its doc says
+	// the standard library one is never imported unqualified here.
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -154,12 +159,8 @@ func TestJavaProbesBothSpellingsAndAsksForStderrOnlyWhereItAnswers(t *testing.T)
 }
 
 func TestStderrIsReadOnlyWhenTheProbeAsksForIt(t *testing.T) {
-	dir := t.TempDir()
 	// A JDK 8 answering the only way it can.
-	script := filepath.Join(dir, "nyrvo-oldjava")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'openjdk version \"1.8.0_402\"' >&2\n"), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
+	dir := fakeProbe(t, "nyrvo-oldjava", "", "openjdk version \"1.8.0_402\"\n", 0)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	asking := newCollector("java", probe{binary: "nyrvo-oldjava", args: []string{"-version"}, stderr: true})
@@ -179,6 +180,60 @@ func TestStderrIsReadOnlyWhenTheProbeAsksForIt(t *testing.T) {
 	}
 }
 
+// fakeProbe puts an executable named binary on PATH whose behaviour is written
+// in Go and compiled for whatever platform the tests run on.
+//
+// These used to be "#!/bin/sh" files. A shebang means nothing on Windows, so
+// the fakes never ran there: two tests failed outright and a third passed for
+// the wrong reason, because a binary that cannot start and a binary that
+// answers nothing both end in ErrUnavailable. A compiled helper is the only
+// version that tests the same behaviour everywhere.
+func fakeProbe(t *testing.T, binary, stdout, stderr string, exitCode int) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	source := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if s := %q; s != "" {
+		fmt.Fprint(os.Stdout, s)
+	}
+	if s := %q; s != "" {
+		fmt.Fprint(os.Stderr, s)
+	}
+	os.Exit(%d)
+}
+`, stdout, stderr, exitCode)
+
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte(source), 0o644); err != nil {
+		t.Fatalf("write fake probe source: %v", err)
+	}
+	// A module file, because `go build` outside a module is an error rather
+	// than a fallback.
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module nyrvofakeprobe\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatalf("write fake probe module: %v", err)
+	}
+
+	name := binary
+	if goruntime.GOOS == "windows" {
+		// LookPath finds "name" through "name.exe"; the built file has to
+		// carry the extension for Windows to consider it executable at all.
+		name += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", filepath.Join(dir, name), src)
+	build.Dir = dir
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build fake probe: %v: %s", err, out)
+	}
+	return dir
+}
+
 func TestEveryRuntimeHasADistinctName(t *testing.T) {
 	// The name is the diff key and the string a requirement matches on. Two
 	// collectors sharing one would silently overwrite each other's observation.
@@ -192,15 +247,11 @@ func TestEveryRuntimeHasADistinctName(t *testing.T) {
 }
 
 func TestProbeThatRefusesToAnswerIsUnavailableNotFatal(t *testing.T) {
-	dir := t.TempDir()
 	// A binary that exists and exits non-zero is what rustup, rbenv and pyenv
 	// all produce when a project pins a toolchain the machine does not have.
 	// That is the drift Nyrvo is being run to find, not a reason to throw away
 	// every other observation in the capture.
-	script := filepath.Join(dir, "nyrvo-refuses")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho \"error: Missing manifest in toolchain\" >&2\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
+	dir := fakeProbe(t, "nyrvo-refuses", "", "error: Missing manifest in toolchain\n", 1)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	c := newCollector("refuses", probe{binary: "nyrvo-refuses", args: []string{"--version"}})
@@ -221,11 +272,7 @@ func TestProbeThatRefusesToAnswerIsUnavailableNotFatal(t *testing.T) {
 }
 
 func TestUnparseableVersionIsUnavailableNotFatal(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "nyrvo-babbles")
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 'not a version at all'\n"), 0o755); err != nil {
-		t.Fatalf("write script: %v", err)
-	}
+	dir := fakeProbe(t, "nyrvo-babbles", "not a version at all\n", "", 0)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	c := newCollector("babbles", probe{binary: "nyrvo-babbles", args: []string{"--version"}})

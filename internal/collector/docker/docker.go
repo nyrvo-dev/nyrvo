@@ -53,6 +53,12 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 	}
 
 	clientVersion, err := collectClientVersion(ctx, run)
+	// The outer context is asked first: a cancelled capture must abort rather
+	// than fall through and record a Docker section whose client version was
+	// never actually read.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	if err != nil {
 		return err
 	}
@@ -64,23 +70,23 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 
 	// ServerVersion is only knowable when the daemon answers, and the server
 	// probe failing is the expected, interesting case — CLI present, daemon
-	// down — so it degrades to an empty field rather than an error. A cancelled
-	// context is the one server-side failure that must surface, because it
-	// says nothing about the daemon.
+	// down — so it degrades to an empty field rather than an error. Only the
+	// outer context proves the caller cancelled; an inner probe deadline means
+	// the tool was too slow to answer and should degrade like any other failure.
 	serverVersion, serr := run(ctx, "docker", "version", "--format", "{{.Server.Version}}")
 	switch {
 	case serr == nil:
 		docker.ServerVersion = normalizeVersion(serverVersion)
-	case isContextErr(serr):
-		return serr
+	case ctx.Err() != nil:
+		return ctx.Err()
 	}
 	docker.DaemonRunning = docker.ServerVersion != ""
 
 	composeVersion, cerr := collectComposeVersion(ctx, run)
 	if cerr == nil {
 		docker.ComposeVersion = composeVersion
-	} else if isContextErr(cerr) {
-		return cerr
+	} else if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	// Running containers are only askable of a daemon that answers. Listing them
@@ -91,8 +97,8 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		services, serr := Services(ctx, run)
 		if serr == nil {
 			snap.Services = append(snap.Services, services...)
-		} else if isContextErr(serr) {
-			return serr
+		} else if ctx.Err() != nil {
+			return ctx.Err()
 		}
 	}
 
@@ -112,19 +118,17 @@ func collectClientVersion(ctx context.Context, run runFunc) (string, error) {
 			return v, nil
 		}
 	}
-	if isContextErr(err) {
-		return "", err
-	}
 	if errors.Is(err, collector.ErrUnavailable) {
 		return "", fmt.Errorf("docker: %w", err)
 	}
 
+	// A probe deadline falls through to the fallback rather than giving up. The
+	// first probe contacts the daemon and the fallback does not, so a daemon too
+	// slow to answer is exactly the situation where the cheaper question is
+	// worth asking.
 	legacy, lerr := run(ctx, "docker", "--version")
 	if lerr == nil {
 		return normalizeVersion(legacy), nil
-	}
-	if isContextErr(lerr) {
-		return "", lerr
 	}
 	if errors.Is(lerr, collector.ErrUnavailable) {
 		return "", fmt.Errorf("docker: %w", lerr)
@@ -143,18 +147,12 @@ func collectComposeVersion(ctx context.Context, run runFunc) (string, error) {
 	if err == nil {
 		return normalizeVersion(version), nil
 	}
-	if isContextErr(err) {
-		return "", err
-	}
-
 	// docker compose is the plugin form; docker-compose is the legacy
-	// standalone binary. Try the other before concluding compose is absent.
+	// standalone binary. Try the other before concluding compose is absent,
+	// including when the first probe merely ran out of time.
 	legacy, lerr := run(ctx, "docker-compose", "--version")
 	if lerr == nil {
 		return normalizeVersion(legacy), nil
-	}
-	if isContextErr(lerr) {
-		return "", lerr
 	}
 	return "", nil
 }
@@ -170,12 +168,4 @@ var versionRE = regexp.MustCompile(`\d+(\.\d+)+`)
 // yields an empty string rather than a wrong one.
 func normalizeVersion(s string) string {
 	return versionRE.FindString(s)
-}
-
-// isContextErr reports whether err is a cancelled or timed-out context. Such an
-// error is a real collection failure that must surface as itself — nothing a
-// retry could change it, and it must never masquerade as "collector
-// unavailable".
-func isContextErr(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

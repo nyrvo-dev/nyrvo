@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,18 +19,32 @@ func pinHome(t *testing.T, home string) {
 	t.Cleanup(func() { homeDir = original })
 }
 
+// homeDirFixture and under build the test's paths with the separator of the
+// platform the tests run on. redactHome compares against filepath.Separator, so
+// a hardcoded "/Users/ada" tested nothing on Windows except that the fixture was
+// written on a Unix machine.
+var homeDirFixture = filepath.Join(string(filepath.Separator)+"Users", "ada")
+
+func under(root string, parts ...string) string {
+	return filepath.Join(append([]string{root}, parts...)...)
+}
+
 func TestRedactHome(t *testing.T) {
+	home := homeDirFixture
+	elsewhere := filepath.Join(string(filepath.Separator)+"usr", "local", "bin", "node")
+	// A path that merely starts with the same characters is a different
+	// directory: /Users/adamant is not inside /Users/ada.
+	sibling := under(filepath.Join(string(filepath.Separator)+"Users", "adamant"), "bin", "go")
+
 	cases := []struct {
 		path, home, want string
 	}{
-		{"/Users/ada/.local/bin/node", "/Users/ada", "~/.local/bin/node"},
-		{"/Users/ada", "/Users/ada", "~"},
-		{"/usr/local/bin/node", "/Users/ada", "/usr/local/bin/node"},
-		// A path that merely starts with the same characters is a different
-		// directory: /Users/adam is not inside /Users/ada.
-		{"/Users/adamant/bin/go", "/Users/ada", "/Users/adamant/bin/go"},
-		{"", "/Users/ada", ""},
-		{"/usr/bin/go", "", "/usr/bin/go"},
+		{under(home, ".local", "bin", "node"), home, "~" + string(filepath.Separator) + filepath.Join(".local", "bin", "node")},
+		{home, home, "~"},
+		{elsewhere, home, elsewhere},
+		{sibling, home, sibling},
+		{"", home, ""},
+		{filepath.Join(string(filepath.Separator)+"usr", "bin", "go"), "", filepath.Join(string(filepath.Separator)+"usr", "bin", "go")},
 	}
 	for _, tc := range cases {
 		if got := redactHome(tc.path, tc.home); got != tc.want {
@@ -39,25 +54,27 @@ func TestRedactHome(t *testing.T) {
 }
 
 func TestBuildRedactsRuntimePathsWithoutTouchingTheSnapshot(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
+	installed := under(homeDirFixture, ".nvm", "bin", "node")
 	local := &snapshot.Snapshot{
 		Name:     "local",
-		Runtimes: []snapshot.Runtime{{Name: "node", Version: "24.4.0", Path: "/Users/ada/.nvm/bin/node"}},
+		Runtimes: []snapshot.Runtime{{Name: "node", Version: "24.4.0", Path: installed}},
 	}
 
 	in := Build(local, &snapshot.Snapshot{Name: "ci"}, nil, nil, nil)
 
-	if got := in.A.Runtimes[0].Path; got != "~/.nvm/bin/node" {
-		t.Errorf("path in input = %q, want the home directory redacted", got)
+	want := "~" + string(filepath.Separator) + filepath.Join(".nvm", "bin", "node")
+	if got := in.A.Runtimes[0].Path; got != want {
+		t.Errorf("path in input = %q, want %q", got, want)
 	}
 	// The caller is still printing its own report from this snapshot.
-	if got := local.Runtimes[0].Path; got != "/Users/ada/.nvm/bin/node" {
+	if got := local.Runtimes[0].Path; got != installed {
 		t.Errorf("Build modified the caller's snapshot: path = %q", got)
 	}
 }
 
 func TestBuildCarriesOnlyTheEnvironmentNamesTheDiagnosisMentions(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
 	local := &snapshot.Snapshot{
 		Name: "local",
 		Environment: &snapshot.Environment{Names: []string{
@@ -88,7 +105,7 @@ func TestBuildCarriesOnlyTheEnvironmentNamesTheDiagnosisMentions(t *testing.T) {
 }
 
 func TestBuildDropsCaptureTime(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
 	in := Build(
 		&snapshot.Snapshot{Name: "local", CreatedAt: at},
@@ -101,7 +118,7 @@ func TestBuildDropsCaptureTime(t *testing.T) {
 }
 
 func TestBuildToleratesNilSnapshots(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
 	in := Build(nil, nil, nil, nil, nil)
 	if in.A == nil || in.B == nil {
 		t.Fatal("Build returned a nil environment; every renderer would have to guard it")
@@ -112,7 +129,7 @@ func TestBuildToleratesNilSnapshots(t *testing.T) {
 // whole document and looking for a value that was never captured is the check
 // that keeps holding when someone adds a section to the snapshot.
 func TestInputCannotCarryAnEnvironmentValue(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
 	local := &snapshot.Snapshot{
 		Name:        "local",
 		Environment: &snapshot.Environment{Names: []string{"DATABASE_URL"}},
@@ -134,7 +151,7 @@ func TestInputCannotCarryAnEnvironmentValue(t *testing.T) {
 }
 
 func TestBuildCopiesEvidenceRatherThanAliasingIt(t *testing.T) {
-	pinHome(t, "/Users/ada")
+	pinHome(t, homeDirFixture)
 	d := &diff.Result{Differences: []diff.Difference{
 		{Component: diff.ComponentRuntime, Key: "node", Kind: diff.KindChanged, A: "24.4.0", B: "22.0.0"},
 	}}

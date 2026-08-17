@@ -72,7 +72,7 @@ func TestCIImportFailedRunPicksFailedJob(t *testing.T) {
 		jobsDoc: readFixture(t, "jobs-failed.json"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, errOut := run(t, "ci", "import", "31921289286")
 	if code != ExitOK {
@@ -150,7 +150,7 @@ func TestCIImportMatrixNeedsJobName(t *testing.T) {
 		jobsDoc: readFixture(t, "jobs-matrix.json"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, _, errOut := run(t, "ci", "import", "31916576297")
 	if code != ExitUsage {
@@ -172,7 +172,7 @@ func TestCIImportNamedJob(t *testing.T) {
 		jobsDoc: readFixture(t, "jobs-matrix.json"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, stdout, errOut := run(t, "ci", "import", "31916576297", "CodeQL-Build (actions, none, security-and-quality)")
 	if code != ExitOK {
@@ -191,7 +191,7 @@ func TestCIImportUnknownJob(t *testing.T) {
 		jobsDoc: readFixture(t, "jobs-matrix.json"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, _, errOut := run(t, "ci", "import", "31916576297", "no-such-job")
 	if code != ExitError {
@@ -213,7 +213,7 @@ func TestCIImportUnknownJob(t *testing.T) {
 func TestCIImportRejectsBadRefBeforeNetwork(t *testing.T) {
 	stub := &ciExecStub{}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	for _, bad := range []string{"../../etc", "not-a-run"} {
 		if code, _, errOut := run(t, "ci", "import", bad); code != ExitError {
@@ -233,7 +233,7 @@ func TestCIImportRunCallError(t *testing.T) {
 		runErr:  errors.New("boom"),
 	}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	code, _, errOut := run(t, "ci", "import", "31921289286")
 	if code != ExitError {
@@ -247,7 +247,7 @@ func TestCIImportRunCallError(t *testing.T) {
 func TestCIImportUsage(t *testing.T) {
 	stub := &ciExecStub{}
 	stubCIClient(t, stub)
-	t.Chdir(t.TempDir())
+	chdirWorkDir(t)
 
 	tests := []struct {
 		name string

@@ -15,6 +15,17 @@ not.
 
 - `SECURITY.md`: how to report a vulnerability privately, what Nyrvo already
   refuses to do, and what is deliberately not a vulnerability.
+- Windows is verified. CI runs the whole suite on Linux, macOS and Windows,
+  across Go 1.25 and 1.26.
+
+### Fixed
+
+- A slow external probe no longer fails a whole capture. `collector.Run` applies
+  its own deadline, and the docker collector treated that expiring as if the
+  caller had cancelled — so one sluggish `docker compose version` discarded every
+  other observation. Only genuine cancellation now aborts a capture.
+- The capture error names the collectors that failed instead of saying "some
+  collectors failed".
 
 ## [0.1.0] — 2026-08-16
 

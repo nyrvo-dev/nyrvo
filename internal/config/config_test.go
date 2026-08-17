@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -48,7 +49,32 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
-func TestSaveCreatesOwnerOnlyDirectoryAndFile(t *testing.T) {
+func TestSaveCreatesTheDirectoryAndFile(t *testing.T) {
+	root := useTempConfigDir(t)
+
+	if err := Save(&Config{}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "nyrvo")); err != nil {
+		t.Fatalf("Stat(config directory) error = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "nyrvo", "config.json")); err != nil {
+		t.Fatalf("Stat(config file) error = %v", err)
+	}
+}
+
+// TestSaveIsOwnerOnly checks the permission bits, which only exist on POSIX.
+//
+// Windows has no owner/group/other bits: Go's Chmod there toggles the read-only
+// attribute and Stat reports 0666 or 0777 regardless. Asserting 0600 on Windows
+// would not be a stricter test, it would be a test claiming a guarantee the
+// platform does not offer — which is the one thing this project refuses to do
+// everywhere else. The behaviour above is verified on every platform; the
+// permission promise is verified where the promise means something.
+func TestSaveIsOwnerOnly(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("POSIX permission bits do not exist on Windows")
+	}
 	root := useTempConfigDir(t)
 
 	if err := Save(&Config{}); err != nil {

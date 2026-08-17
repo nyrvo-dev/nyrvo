@@ -88,6 +88,37 @@ func TestRunUnavailableCollectorsAreNotFailures(t *testing.T) {
 	}
 }
 
+func TestFailedSectionsReturnsOnlyFailedCollectors(t *testing.T) {
+	res := &Result{Sections: []SectionResult{
+		{Collector: "system", Status: StatusOK},
+		{Collector: "node", Status: StatusUnavailable},
+		{Collector: "docker", Status: StatusFailed},
+		{Collector: "git", Status: StatusFailed},
+	}}
+
+	got := res.FailedSections()
+	want := []string{"docker", "git"}
+	if len(got) != len(want) {
+		t.Fatalf("FailedSections() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("FailedSections() = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestFailedSectionsReturnsNilWhenNothingFailed(t *testing.T) {
+	res := &Result{Sections: []SectionResult{
+		{Collector: "system", Status: StatusOK},
+		{Collector: "node", Status: StatusUnavailable},
+	}}
+
+	if got := res.FailedSections(); got != nil {
+		t.Errorf("FailedSections() = %v, want nil", got)
+	}
+}
+
 func TestRunNormalizesSnapshot(t *testing.T) {
 	collectors := []collector.Collector{
 		stub{name: "runtimes", collect: func(s *snapshot.Snapshot) {

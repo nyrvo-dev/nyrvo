@@ -183,7 +183,7 @@ func TestCaptureRejectsPathTraversal(t *testing.T) {
 
 func mustCapture(t *testing.T, name string) {
 	t.Helper()
-	if code, _, errOut := run(t, "capture", name); code != ExitOK {
-		t.Fatalf("capture %s: exit %d, stderr: %s", name, code, errOut)
+	if code, stdout, errOut := run(t, "capture", name); code != ExitOK {
+		t.Fatalf("capture %s: exit %d, stdout: %s, stderr: %s", name, code, stdout, errOut)
 	}
 }

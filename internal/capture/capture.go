@@ -52,6 +52,18 @@ func (r *Result) Failed() bool {
 	return false
 }
 
+// FailedSections names the collectors that failed outright, in the order
+// they ran.
+func (r *Result) FailedSections() []string {
+	var failed []string
+	for _, s := range r.Sections {
+		if s.Status == StatusFailed {
+			failed = append(failed, s.Collector)
+		}
+	}
+	return failed
+}
+
 // Options configures a capture run.
 type Options struct {
 	// Name identifies the snapshot ("local", "staging").

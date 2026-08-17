@@ -159,6 +159,8 @@ func defaultCollectors() []collector.Collector {
 		runtime.Go(),
 		runtime.Node(),
 		runtime.NPM(),
+		runtime.PNPM(),
+		runtime.Yarn(),
 		runtime.Python(),
 		runtime.Ruby(),
 		runtime.PHP(),

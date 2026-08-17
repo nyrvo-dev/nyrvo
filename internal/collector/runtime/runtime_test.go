@@ -173,6 +173,67 @@ func TestCollectDotNet(t *testing.T) {
 	}
 }
 
+// The pnpm probe must read a bare version. package.json's packageManager field
+// pins the exact pnpm corepack must run, so the observation has to line up with
+// that version to be judged against it.
+func TestCollectPNPM(t *testing.T) {
+	dir := fakeProbe(t, "pnpm", "10.33.0\n", "", 0)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := &snapshot.Snapshot{}
+	c := PNPM()
+
+	if got := c.Name(); got != "pnpm" {
+		t.Fatalf("Name() = %q, want %q", got, "pnpm")
+	}
+	if err := c.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("PNPM().Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 {
+		t.Fatalf("got %d runtimes, want 1", len(snap.Runtimes))
+	}
+	rt := snap.Runtimes[0]
+	if rt.Name != "pnpm" {
+		t.Fatalf("Runtime.Name = %q, want %q", rt.Name, "pnpm")
+	}
+	if rt.Version != "10.33.0" {
+		t.Fatalf("Runtime.Version = %q, want %q", rt.Version, "10.33.0")
+	}
+	if rt.Path == "" {
+		t.Error("Runtime.Path is empty, want a path from LookPath")
+	}
+}
+
+// The yarn probe must read a bare version, for the same reason the pnpm probe
+// does: packageManager pins the exact Yarn corepack must run.
+func TestCollectYarn(t *testing.T) {
+	dir := fakeProbe(t, "yarn", "4.6.0\n", "", 0)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := &snapshot.Snapshot{}
+	c := Yarn()
+
+	if got := c.Name(); got != "yarn" {
+		t.Fatalf("Name() = %q, want %q", got, "yarn")
+	}
+	if err := c.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Yarn().Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 {
+		t.Fatalf("got %d runtimes, want 1", len(snap.Runtimes))
+	}
+	rt := snap.Runtimes[0]
+	if rt.Name != "yarn" {
+		t.Fatalf("Runtime.Name = %q, want %q", rt.Name, "yarn")
+	}
+	if rt.Version != "4.6.0" {
+		t.Fatalf("Runtime.Version = %q, want %q", rt.Version, "4.6.0")
+	}
+	if rt.Path == "" {
+		t.Error("Runtime.Path is empty, want a path from LookPath")
+	}
+}
+
 func TestJavaProbesBothSpellingsAndAsksForStderrOnlyWhereItAnswers(t *testing.T) {
 	c, ok := Java().(*runtimeCollector)
 	if !ok {
@@ -273,7 +334,7 @@ func TestEveryRuntimeHasADistinctName(t *testing.T) {
 	// The name is the diff key and the string a requirement matches on. Two
 	// collectors sharing one would silently overwrite each other's observation.
 	seen := map[string]bool{}
-	for _, c := range []collector.Collector{Go(), Node(), NPM(), Python(), Ruby(), PHP(), Rust(), Java(), DotNet()} {
+	for _, c := range []collector.Collector{Go(), Node(), NPM(), PNPM(), Yarn(), Python(), Ruby(), PHP(), Rust(), Java(), DotNet()} {
 		if seen[c.Name()] {
 			t.Fatalf("two runtime collectors are both named %q", c.Name())
 		}

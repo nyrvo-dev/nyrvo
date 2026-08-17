@@ -158,6 +158,48 @@ func TestJavaVersionReqs(t *testing.T) {
 	}
 }
 
+func TestPackageManagerReq(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want *snapshot.Requirement
+	}{
+		{"pnpm", "pnpm@10.33.0", &snapshot.Requirement{Runtime: "pnpm", Constraint: "10.33.0", Source: "package.json packageManager"}},
+		{"pnpm with integrity suffix", "pnpm@10.33.0+sha512.1234567890abcdef", &snapshot.Requirement{Runtime: "pnpm", Constraint: "10.33.0", Source: "package.json packageManager"}},
+		{"npm", "npm@9.8.1", &snapshot.Requirement{Runtime: "npm", Constraint: "9.8.1", Source: "package.json packageManager"}},
+		{"yarn", "yarn@4.6.0", &snapshot.Requirement{Runtime: "yarn", Constraint: "4.6.0", Source: "package.json packageManager"}},
+		{"unknown package manager", "bun@1.1.0", nil},
+		{"no @ separator", "pnpm10.33.0", nil},
+		{"empty version", "pnpm@", nil},
+		{"empty field", "", nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := packageManagerReq(tt.in); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("packageManagerReq(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPackageManagerIsAPinNotAFloor(t *testing.T) {
+	// Corepack downloads and runs precisely the version packageManager names
+	// and refuses anything else, so the requirement must enforce the exact
+	// version. This is the opposite of the go directive and of global.json
+	// sdk.version, both of which roll forward — and both of which this repo once
+	// recorded as pins before learning the difference.
+	req := packageManagerReq("pnpm@10.33.0+sha512.abc")
+	if req == nil {
+		t.Fatal("packageManagerReq returned nil")
+	}
+	if req.Minimum {
+		t.Error("packageManager is a pin, not a floor; Minimum must stay false")
+	}
+	if req.Constraint != "10.33.0" {
+		t.Errorf("Constraint = %q, want %q", req.Constraint, "10.33.0")
+	}
+}
+
 func TestGlobalJSONReqs(t *testing.T) {
 	t.Run("version is a floor", func(t *testing.T) {
 		dir := t.TempDir()

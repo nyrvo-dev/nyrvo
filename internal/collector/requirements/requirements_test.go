@@ -312,6 +312,42 @@ func TestGlobalJSONSDKVersion(t *testing.T) {
 	}
 }
 
+func TestPackageManagerPinned(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "package.json", `{"packageManager":"pnpm@10.33.0+sha512.abcdef","engines":{"node":">=24"}}`)
+
+	snap, err := collect(t, dir)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	want := []snapshot.Requirement{
+		req("node", ">=24", "package.json engines.node"),
+		{Runtime: "pnpm", Constraint: "10.33.0", Source: "package.json packageManager"},
+	}
+	if !reflect.DeepEqual(snap.Requirements, want) {
+		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)
+	}
+}
+
+func TestPackageManagerUnknownOrMalformedYieldsNothing(t *testing.T) {
+	for _, pm := range []string{
+		`{"packageManager":"bun@1.1.0"}`,
+		`{"packageManager":"pnpm10.33.0"}`,
+		`{"packageManager":"pnpm@"}`,
+	} {
+		dir := t.TempDir()
+		writeFile(t, dir, "package.json", pm)
+
+		_, err := collect(t, dir)
+		// A packageManager Nyrvo cannot read contributes nothing, so a project
+		// declaring only it has no requirements at all — the section is absent,
+		// never an empty claim.
+		if !errors.Is(err, collector.ErrUnavailable) {
+			t.Fatalf("Collect for %s: err = %v, want ErrUnavailable", pm, err)
+		}
+	}
+}
+
 func TestCommentsAndBlankLinesSkipped(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, ".nvmrc", "\n# pinned via asdf\n\nv20.11.1\n")

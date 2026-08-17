@@ -171,6 +171,7 @@ func TestSnapshotSetupActions(t *testing.T) {
 		{name: "python", uses: "actions/setup-python@v5", with: map[string]string{"python-version": "3.13.1"}, runtime: "python", version: "3.13.1"},
 		{name: "go", uses: "actions/setup-go@v5", with: map[string]string{"go-version": "1.22.4"}, runtime: "go", version: "1.22.4"},
 		{name: "dotnet", uses: "actions/setup-dotnet@v4", with: map[string]string{"dotnet-version": "9.0.100"}, runtime: "dotnet", version: "9.0.100"},
+		{name: "pnpm", uses: "pnpm/action-setup@v4", with: map[string]string{"version": "10.33.0"}, runtime: "pnpm", version: "10.33.0"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -498,13 +499,14 @@ func TestSetupActionsBeyondTheFirstPartyOnes(t *testing.T) {
 		{Uses: "ruby/setup-ruby@v1", With: map[string]string{"ruby-version": "3.3"}},
 		{Uses: "shivammathur/setup-php@v2", With: map[string]string{"php-version": "8.3"}},
 		{Uses: "dtolnay/rust-toolchain@stable", With: map[string]string{"toolchain": "1.75.0"}},
+		{Uses: "pnpm/action-setup@v4", With: map[string]string{"version": "10.33.0"}},
 	}}
 	snap, err := Snapshot(&Workflow{Path: ".github/workflows/ci.yml"}, job, "ci", time.Time{})
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	want := map[string]string{"java": "21", "ruby": "3.3", "php": "8.3", "rust": "1.75.0"}
+	want := map[string]string{"java": "21", "ruby": "3.3", "php": "8.3", "rust": "1.75.0", "pnpm": "10.33.0"}
 	got := map[string]string{}
 	for _, rt := range snap.Runtimes {
 		got[rt.Name] = rt.Version

@@ -203,6 +203,26 @@ func NPM() collector.Collector {
 	return newCollector("npm", probe{binary: "npm", args: []string{"--version"}})
 }
 
+// PNPM returns a collector for the pnpm package manager.
+//
+// It is a runtime here because package.json's packageManager field pins the
+// exact pnpm version corepack must run, and a mismatch changes how the
+// pnpm-lock.yaml is resolved. pnpm's version is independent of npm's and
+// Node's, so it has to be observed for that pin to be judged against anything.
+func PNPM() collector.Collector {
+	return newCollector("pnpm", probe{binary: "pnpm", args: []string{"--version"}})
+}
+
+// Yarn returns a collector for the Yarn package manager.
+//
+// It is a runtime here because package.json's packageManager field pins the
+// exact Yarn version corepack must run, and a mismatch changes how the lockfile
+// is resolved. Yarn's version is independent of npm's and Node's, so it has to
+// be observed for that pin to be judged against anything.
+func Yarn() collector.Collector {
+	return newCollector("yarn", probe{binary: "yarn", args: []string{"--version"}})
+}
+
 // DotNet returns a collector for the .NET SDK.
 //
 // dotnet --version reports the SDK version — "9.0.100", not the runtime's

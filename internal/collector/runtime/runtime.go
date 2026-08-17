@@ -133,6 +133,17 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 	// drift Nyrvo invented rather than drift it observed.
 	if timedOut {
 		snap.MarkUnmeasured("runtime", c.name)
+	} else if why != nil {
+		// A probe that answered by refusing is the deterministic opposite of a
+		// timeout: LookPath found the binary a moment ago, so the runtime is
+		// installed, and it declined to answer — a global.json, a
+		// rust-toolchain.toml or an rbenv version naming a toolchain this
+		// machine does not have. Asking again gives the same refusal, so the
+		// snapshot must report it, not skip it the way unmeasured is skipped.
+		//
+		// Only the name is recorded. The probe's own error carries the user's
+		// absolute paths, and a snapshot is pasted into bug reports.
+		snap.MarkUnusable("runtime", c.name)
 	}
 	// No probe produced a version; hand the sentinel back wrapped so capture
 	// records the runtime as absent instead of failing. When a probe did run and

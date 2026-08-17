@@ -82,6 +82,21 @@ type Snapshot struct {
 	// Anything listed here is not absent. It is unknown, and consumers must
 	// treat it as a question they cannot answer rather than as a negative one.
 	Unmeasured []string `json:"unmeasured,omitempty"`
+	// Unusable names runtimes that are installed but would not report a version,
+	// as "<component>.<key>" — "runtime.dotnet", "runtime.rust".
+	//
+	// It is the deterministic counterpart to Unmeasured. A probe that runs out
+	// of time says nothing about the tool, and the diff skips it. A probe that
+	// answers by refusing says a great deal: the binary was found on PATH, so
+	// the runtime is installed, and it declined to answer — usually because a
+	// pinned toolchain (a global.json, a rust-toolchain.toml, an rbenv version)
+	// names a version this machine does not have. Asking again gives the same
+	// answer, so this is drift to report, not noise to skip.
+	//
+	// Only the component.key is recorded, never the tool's error text: the real
+	// messages embed the user's absolute paths, and snapshots end up pasted into
+	// bug reports. A runtime listed here is not missing.
+	Unusable []string `json:"unusable,omitempty"`
 }
 
 // Source kinds. They are stable identifiers: output and future diagnostic
@@ -271,6 +286,10 @@ func (s *Snapshot) Normalize() {
 		sort.Strings(s.Unmeasured)
 		s.Unmeasured = slices.Compact(s.Unmeasured)
 	}
+	if len(s.Unusable) > 0 {
+		sort.Strings(s.Unusable)
+		s.Unusable = slices.Compact(s.Unusable)
+	}
 }
 
 // MarkUnmeasured records that an observation was attempted and did not
@@ -278,6 +297,33 @@ func (s *Snapshot) Normalize() {
 // remember that the list is deduplicated by Normalize.
 func (s *Snapshot) MarkUnmeasured(component, key string) {
 	s.Unmeasured = append(s.Unmeasured, component+"."+key)
+}
+
+// MarkUnusable records that a runtime is installed but would not report a
+// version. Collectors call it instead of appending, so no caller has to
+// remember that the list is deduplicated by Normalize.
+//
+// Only the component and key are stored, never the error. A tool's refusal
+// often carries the user's absolute paths, and a snapshot must not write them:
+// MarkUnusable takes the two identifiers and nothing else.
+func (s *Snapshot) MarkUnusable(component, key string) {
+	s.Unusable = append(s.Unusable, component+"."+key)
+}
+
+// IsUnusable reports whether the runtime was recorded as installed but
+// refusing to answer, so the diagnostic layer can tell "missing" apart from
+// "present but not usable".
+func (s *Snapshot) IsUnusable(component, key string) bool {
+	if s == nil {
+		return false
+	}
+	target := component + "." + key
+	for _, k := range s.Unusable {
+		if k == target {
+			return true
+		}
+	}
+	return false
 }
 
 // Runtime returns the runtime with the given name, or nil when absent.

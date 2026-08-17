@@ -194,6 +194,68 @@ func TestRuntimeMissingDoesNotOverclaimAgainstARun(t *testing.T) {
 	}
 }
 
+// A runtime listed as unusable is installed — the collector found the binary on
+// PATH — but would not report a version, which a pinned toolchain this machine
+// does not have makes dotnet, rustc and ruby do. Calling that missing repeats
+// the untruth this rule exists to correct, and recommending an install would
+// tell the user to install a tool they already have.
+func TestRuntimeUnusableIsNotMissing(t *testing.T) {
+	local := snapshot.New("local", time.Time{})
+	local.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+	local.Unusable = []string{"runtime.dotnet"}
+
+	ci := snapshot.New("ci", time.Time{})
+	ci.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}, {Name: "dotnet", Version: "9.0.100"}}
+
+	findings := evalRule(t, finding.RuntimeMissing, Input{A: local, B: ci, Diff: diff.Compare(local, ci)})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one", findings)
+	}
+	f := findings[0]
+	if f.Rule != finding.RuntimeUnusable {
+		t.Fatalf("Rule = %q, want %q", f.Rule, finding.RuntimeUnusable)
+	}
+	if f.Severity != finding.SeverityMedium {
+		t.Errorf("Severity = %q, want %q", f.Severity, finding.SeverityMedium)
+	}
+	if f.Component != diff.ComponentRuntime || f.Key != "dotnet" || f.Expected != "9.0.100" {
+		t.Errorf("finding location = %+v", f)
+	}
+	if f.Actual == "missing" || !strings.Contains(f.Actual, "installed") {
+		t.Errorf("Actual = %q, want it to say the runtime is installed", f.Actual)
+	}
+	if !strings.Contains(f.Description, "installed") {
+		t.Errorf("description should say the runtime is installed: %q", f.Description)
+	}
+	if strings.Contains(f.Description, "missing") {
+		t.Errorf("description says the runtime is missing: %q", f.Description)
+	}
+	if strings.Contains(strings.ToLower(f.Recommendation), "install dotnet") {
+		t.Errorf("recommendation tells the user to install the runtime: %q", f.Recommendation)
+	}
+}
+
+// The rule changes its answer only when the side that lacks the version lists
+// the runtime as unusable. A machine that genuinely does not have the runtime
+// still gets runtime.missing: "installed but unusable" and "absent" must stay
+// different answers.
+func TestRuntimeMissingStillFiresWhenNotListedUnusable(t *testing.T) {
+	local := snapshot.New("local", time.Time{})
+	local.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+
+	ci := snapshot.New("ci", time.Time{})
+	ci.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}, {Name: "dotnet", Version: "9.0.100"}}
+
+	findings := evalRule(t, finding.RuntimeMissing, Input{A: local, B: ci, Diff: diff.Compare(local, ci)})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one", findings)
+	}
+	f := findings[0]
+	if f.Rule != finding.RuntimeMissing || f.Actual != "missing" {
+		t.Fatalf("finding = %+v, want runtime.missing with actual \"missing\"", f)
+	}
+}
+
 // The reason this matters more for an agent than for a person: a human reading
 // "npm is missing" on a machine that has npm squints and moves on, and an agent
 // installs npm. A probe that ran out of time must not reach a finding at all.

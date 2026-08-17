@@ -52,7 +52,7 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		run = collector.Run
 	}
 
-	clientVersion, err := collectClientVersion(ctx, run)
+	clientVersion, clientTimedOut, err := collectClientVersion(ctx, run)
 	// The outer context is asked first: a cancelled capture must abort rather
 	// than fall through and record a Docker section whose client version was
 	// never actually read.
@@ -61,6 +61,9 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 	}
 	if err != nil {
 		return err
+	}
+	if clientTimedOut {
+		snap.MarkUnmeasured("docker", "client_version")
 	}
 
 	// The section is attached to the snapshot only once collection succeeds: a
@@ -79,14 +82,29 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		docker.ServerVersion = normalizeVersion(serverVersion)
 	case ctx.Err() != nil:
 		return ctx.Err()
+	case collector.IsTimeout(serr):
+		// A probe that ran out of time proves nothing about the daemon. Both
+		// fields below would otherwise state that it is down, and DaemonRunning
+		// is the more damaging of the two: it is a bool, so there is no value
+		// that means "not known" and the false is indistinguishable from an
+		// observation.
+		snap.MarkUnmeasured("docker", "server_version")
+		snap.MarkUnmeasured("docker", "daemon_running")
 	}
 	docker.DaemonRunning = docker.ServerVersion != ""
 
-	composeVersion, cerr := collectComposeVersion(ctx, run)
-	if cerr == nil {
+	composeVersion, composeTimedOut, cerr := collectComposeVersion(ctx, run)
+	switch {
+	case cerr == nil:
 		docker.ComposeVersion = composeVersion
-	} else if ctx.Err() != nil {
+	case ctx.Err() != nil:
 		return ctx.Err()
+	}
+	if composeTimedOut {
+		// The case that produced a published untruth: windows-latest carries
+		// compose, a cold probe ran out of time, and the daily feed recorded the
+		// runner as having none.
+		snap.MarkUnmeasured("docker", "compose_version")
 	}
 
 	// Running containers are only askable of a daemon that answers. Listing them
@@ -111,15 +129,17 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 // `docker version` exit non-zero, or output cannot be parsed — it falls back to
 // `docker --version`, which needs no daemon. Only a missing docker binary
 // (ErrUnavailable) is a hard failure.
-func collectClientVersion(ctx context.Context, run runFunc) (string, error) {
-	version, err := run(ctx, "docker", "version", "--format", "{{.Client.Version}}")
+// timedOut is true when the fallback also ran out of time, which is the one
+// reason an empty version here says nothing about the client.
+func collectClientVersion(ctx context.Context, run runFunc) (version string, timedOut bool, err error) {
+	out, err := run(ctx, "docker", "version", "--format", "{{.Client.Version}}")
 	if err == nil {
-		if v := normalizeVersion(version); v != "" {
-			return v, nil
+		if v := normalizeVersion(out); v != "" {
+			return v, false, nil
 		}
 	}
 	if errors.Is(err, collector.ErrUnavailable) {
-		return "", fmt.Errorf("docker: %w", err)
+		return "", false, fmt.Errorf("docker: %w", err)
 	}
 
 	// A probe deadline falls through to the fallback rather than giving up. The
@@ -128,33 +148,42 @@ func collectClientVersion(ctx context.Context, run runFunc) (string, error) {
 	// worth asking.
 	legacy, lerr := run(ctx, "docker", "--version")
 	if lerr == nil {
-		return normalizeVersion(legacy), nil
+		return normalizeVersion(legacy), false, nil
 	}
 	if errors.Is(lerr, collector.ErrUnavailable) {
-		return "", fmt.Errorf("docker: %w", lerr)
+		return "", false, fmt.Errorf("docker: %w", lerr)
 	}
 	// Both probes answered without a usable version and without saying the
 	// binary is missing; degrade to an empty client version rather than fail.
-	return "", nil
+	// Only the fallback's verdict is reported: it is the probe that does not
+	// need the daemon, so its running out of time is the one that leaves the
+	// client genuinely unknown rather than merely unreachable.
+	return "", collector.IsTimeout(lerr), nil
 }
 
 // collectComposeVersion discovers the compose plugin, or the legacy
 // docker-compose binary when the plugin is not installed. Compose is optional —
 // a machine can have docker without any compose — so an absent or failing
 // compose never fails the capture.
-func collectComposeVersion(ctx context.Context, run runFunc) (string, error) {
-	version, err := run(ctx, "docker", "compose", "version", "--short")
+// timedOut is true when a probe ran out of time, which leaves compose unknown
+// rather than absent.
+func collectComposeVersion(ctx context.Context, run runFunc) (version string, timedOut bool, err error) {
+	out, err := run(ctx, "docker", "compose", "version", "--short")
 	if err == nil {
-		return normalizeVersion(version), nil
+		return normalizeVersion(out), false, nil
 	}
 	// docker compose is the plugin form; docker-compose is the legacy
 	// standalone binary. Try the other before concluding compose is absent,
 	// including when the first probe merely ran out of time.
 	legacy, lerr := run(ctx, "docker-compose", "--version")
 	if lerr == nil {
-		return normalizeVersion(legacy), nil
+		return normalizeVersion(legacy), false, nil
 	}
-	return "", nil
+	// Either probe running out of time is enough. The legacy binary being
+	// absent does not settle whether the plugin exists, so a plugin probe that
+	// never answered leaves the question open however loudly the fallback
+	// reports "not found".
+	return "", collector.IsTimeout(err) || collector.IsTimeout(lerr), nil
 }
 
 // versionRE matches a dotted-digit version such as "29.4.0" or "5.1.2". Two

@@ -360,3 +360,73 @@ func TestPartialRuntimesStillTestifiesToWhatItDeclares(t *testing.T) {
 		t.Fatalf("runtime differences = %+v, want %+v", runtimeDiffs, want)
 	}
 }
+
+// The bug in one test: two captures of one machine, where the first could not
+// read npm in time. Without this, the comparison reports that npm appeared
+// between them — drift Nyrvo invented rather than drift it observed.
+func TestUnmeasuredKeysAreNotReportedAsDrift(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	a.Unmeasured = []string{"runtime.npm"}
+	b := snapshot.New("other", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "npm", Version: "10.9.8"}}
+
+	res := Compare(a, b)
+	if len(res.Differences) != 0 {
+		t.Errorf("an unread probe was reported as a difference: %+v", res.Differences)
+	}
+	// The reader has to be told the comparison was narrowed, or silence reads as
+	// agreement.
+	if !res.Unmeasured {
+		t.Error("Result.Unmeasured = false, want true so the narrowing is announced")
+	}
+}
+
+// daemon_running is the case a one-sided rule would miss. It is a bool, so a
+// probe that ran out of time leaves a confident "false" that is
+// indistinguishable from an observation, and the difference reads as a change
+// rather than as an absence.
+func TestUnmeasuredBoolIsNotReportedAsAChange(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	a.Docker = &snapshot.Docker{ClientVersion: "29.1.5", DaemonRunning: false}
+	a.Unmeasured = []string{"docker.daemon_running", "docker.server_version"}
+	b := snapshot.New("other", time.Time{})
+	b.Docker = &snapshot.Docker{ClientVersion: "29.1.5", ServerVersion: "29.1.5", DaemonRunning: true}
+
+	res := Compare(a, b)
+	for _, d := range res.Differences {
+		if d.Component == ComponentDocker {
+			t.Errorf("an unread docker probe was reported: %+v", d)
+		}
+	}
+}
+
+// The narrowing must be announced even when nothing was dropped, for the same
+// reason a partial environment is: a reader deciding whether the environments
+// agree needs to know the comparison could not cover everything.
+func TestUnmeasuredIsAnnouncedEvenWhenNothingWasDropped(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	a.Unmeasured = []string{"runtime.npm"}
+	b := snapshot.New("other", time.Time{})
+
+	if res := Compare(a, b); !res.Unmeasured {
+		t.Error("Result.Unmeasured = false, want true")
+	}
+}
+
+// Suppression must be exact. A probe that failed to read npm says nothing about
+// node, and swallowing a real difference is the mirror-image defect.
+func TestUnmeasuredSuppressesOnlyTheKeyItNames(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	a.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+	a.Unmeasured = []string{"runtime.npm"}
+	b := snapshot.New("other", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "node", Version: "22.4.0"}, {Name: "npm", Version: "10.9.8"}}
+
+	res := Compare(a, b)
+	if len(res.Differences) != 1 {
+		t.Fatalf("differences = %+v, want only the node change", res.Differences)
+	}
+	if d := res.Differences[0]; d.Key != "node" || d.Kind != KindChanged {
+		t.Errorf("difference = %+v, want the node version change", d)
+	}
+}

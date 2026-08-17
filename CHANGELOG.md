@@ -11,6 +11,28 @@ not.
 
 ## [Unreleased]
 
+### Fixed
+
+- A tool that ran out of time is no longer recorded as a tool that is absent.
+  A probe exceeding its deadline and a binary that is not installed both leave a
+  collector with no version, and Nyrvo published the second answer for the first.
+  On a cold windows-latest runner `npm --version` takes longer than the probe
+  deadline, so two captures of one unchanged machine disagreed about whether it
+  had npm, and the daily runner feed recorded windows-latest as carrying no
+  Docker compose when it carries 2.40.3.
+
+  Snapshots now list such observations in `unmeasured`, the comparison skips
+  them, and `diff` says so rather than narrowing the report in silence.
+  Unmeasured is not missing: it is a question this capture could not answer.
+  `doctor` inherits the fix and no longer raises `runtime.missing` — a finding
+  whose recommendation was to install software the machine already had.
+
+### Added
+
+- `unmeasured` on the snapshot document: an optional list of `component.key`
+  observations that were attempted and did not complete. Additive and optional,
+  so the schema version is unchanged and older documents remain valid.
+
 ### Changed
 
 - `nyrvo capture` reports each collector as it finishes instead of printing the

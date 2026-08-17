@@ -8,6 +8,7 @@
 package snapshot
 
 import (
+	"slices"
 	"sort"
 	"time"
 )
@@ -68,6 +69,19 @@ type Snapshot struct {
 	// going to use it, and buries the one difference that mattered.
 	PartialRuntimes bool         `json:"partial_runtimes,omitempty"`
 	Environment     *Environment `json:"environment,omitempty"`
+	// Unmeasured names observations that were attempted and did not complete,
+	// as "<component>.<key>" — "runtime.npm", "docker.compose_version".
+	//
+	// It exists because a probe that runs out of time and a tool that is not
+	// installed produce the same silence, and recording that silence as absence
+	// is a claim Nyrvo never observed. A cold Windows runner takes longer than
+	// the probe deadline to answer `npm --version`; the machine has npm, and a
+	// snapshot saying otherwise makes two captures of one machine disagree and
+	// invents drift that never happened.
+	//
+	// Anything listed here is not absent. It is unknown, and consumers must
+	// treat it as a question they cannot answer rather than as a negative one.
+	Unmeasured []string `json:"unmeasured,omitempty"`
 }
 
 // Source kinds. They are stable identifiers: output and future diagnostic
@@ -250,6 +264,20 @@ func (s *Snapshot) Normalize() {
 	if s.Environment != nil {
 		sort.Strings(s.Environment.Names)
 	}
+	// Sorted and deduplicated for the same reason every other list is: two
+	// captures of one machine must produce byte-identical documents, and a
+	// runtime with several probes can report the same key more than once.
+	if len(s.Unmeasured) > 0 {
+		sort.Strings(s.Unmeasured)
+		s.Unmeasured = slices.Compact(s.Unmeasured)
+	}
+}
+
+// MarkUnmeasured records that an observation was attempted and did not
+// complete. Collectors call it instead of appending, so no caller has to
+// remember that the list is deduplicated by Normalize.
+func (s *Snapshot) MarkUnmeasured(component, key string) {
+	s.Unmeasured = append(s.Unmeasured, component+"."+key)
 }
 
 // Runtime returns the runtime with the given name, or nil when absent.

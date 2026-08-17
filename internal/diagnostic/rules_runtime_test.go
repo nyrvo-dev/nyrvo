@@ -193,3 +193,25 @@ func TestRuntimeMissingDoesNotOverclaimAgainstARun(t *testing.T) {
 		t.Errorf("description should say the image may still provide it: %q", f.Description)
 	}
 }
+
+// The reason this matters more for an agent than for a person: a human reading
+// "npm is missing" on a machine that has npm squints and moves on, and an agent
+// installs npm. A probe that ran out of time must not reach a finding at all.
+func TestUnreadRuntimeProducesNoMissingFinding(t *testing.T) {
+	// Both sides carry node so the runtime sections are comparable key by key.
+	// With no runtimes at all on one side the difference would be a
+	// whole-section one, which this rule ignores regardless — and the test would
+	// pass without proving anything.
+	a := snapshot.New("local", time.Time{})
+	a.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+	a.Unmeasured = []string{"runtime.npm"}
+	b := snapshot.New("ci", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}, {Name: "npm", Version: "10.9.8"}}
+
+	_, findings := Analyze(a, b)
+	for _, f := range findings {
+		if f.Key == "npm" {
+			t.Errorf("an unread probe produced a finding: %+v", f)
+		}
+	}
+}

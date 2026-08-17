@@ -96,6 +96,7 @@ func DiffText(w io.Writer, res *diff.Result) error {
 		fmt.Fprintf(&b, "No differences between %s and %s.\n", res.A, res.B)
 		writePartialEnvironmentNote(&b, res)
 		writePartialRuntimesNote(&b, res)
+		writeUnmeasuredNote(&b, res)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -128,6 +129,7 @@ func DiffText(w io.Writer, res *diff.Result) error {
 	}
 	writePartialEnvironmentNote(&b, res)
 	writePartialRuntimesNote(&b, res)
+	writeUnmeasuredNote(&b, res)
 	return writeAligned(w, b.String())
 }
 
@@ -151,6 +153,18 @@ func writePartialRuntimesNote(b *strings.Builder, res *diff.Result) {
 	}
 	b.WriteString("\nOne side lists only the runtimes it sets up, so runtimes absent from it\n")
 	b.WriteString("were not compared; a runner image provides more than a workflow mentions.\n")
+}
+
+// writeUnmeasuredNote reports the comparison Nyrvo declined to make. The other
+// two notes describe a source that never claimed to be complete; this one
+// describes a probe that was asked and ran out of time, which is a fact about
+// this capture rather than about the kind of source it came from.
+func writeUnmeasuredNote(b *strings.Builder, res *diff.Result) {
+	if !res.Unmeasured {
+		return
+	}
+	b.WriteString("\nSomething did not answer in time and was left unmeasured, so it was not\n")
+	b.WriteString("compared. Unmeasured is not missing: run the capture again to settle it.\n")
 }
 
 // SnapshotList renders stored snapshot names.

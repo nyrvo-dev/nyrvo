@@ -13,7 +13,12 @@ import (
 // DefaultTimeout bounds a single external tool invocation. Version probes
 // answer in milliseconds; anything slower is a hung tool (an unreachable
 // Docker daemon, a network filesystem) that must not stall a capture.
-const DefaultTimeout = 5 * time.Second
+//
+// A variable rather than a constant so a test can shorten it: what happens when
+// a probe runs out of time is now a behaviour worth asserting, and asserting it
+// against the real five seconds would cost five seconds on every CI job. The
+// package is internal, so nothing outside this module can reach it.
+var DefaultTimeout = 5 * time.Second
 
 // Run executes an external tool and returns its trimmed stdout.
 //
@@ -67,6 +72,20 @@ func RunOutput(ctx context.Context, name string, args ...string) (stdout, stderr
 		return "", "", fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), runErr, firstLine(msg))
 	}
 	return "", "", fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), runErr)
+}
+
+// IsTimeout reports whether a tool was still running when its deadline expired.
+//
+// The distinction matters more than it looks. A tool that is absent and a tool
+// that was too slow both leave a collector with no version to record, and
+// recording either as "not installed" states something Nyrvo never observed. A
+// cold Windows runner needs longer than DefaultTimeout to answer `npm
+// --version`, and the machine plainly has npm.
+//
+// Callers must rule out their own cancellation first: when the caller's context
+// is already done, the inner deadline is a symptom of that and not a slow tool.
+func IsTimeout(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 // LookPath reports where a tool lives, or ErrUnavailable when it is not

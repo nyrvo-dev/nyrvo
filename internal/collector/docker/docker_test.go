@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -358,5 +360,64 @@ func TestCollectRecordsRunningServicesOnlyWhenTheDaemonAnswers(t *testing.T) {
 	}
 	if len(snap.Services) != 0 {
 		t.Fatalf("services = %+v, want none observed", snap.Services)
+	}
+}
+
+// The published untruth this fixes: windows-latest carries compose, a cold
+// probe ran out of time, and the daily feed recorded the runner as having none.
+// A tool that was too slow to answer is unknown, not absent.
+func TestTimedOutProbesAreUnmeasuredNotAbsent(t *testing.T) {
+	timeout := func(args ...string) error {
+		return fmt.Errorf("docker %v: %w", args, context.DeadlineExceeded)
+	}
+	d := &Docker{run: func(_ context.Context, _ string, args ...string) (string, error) {
+		switch {
+		case len(args) > 1 && args[1] == "--format" && strings.Contains(args[2], "Client"):
+			return "29.1.5", nil
+		case len(args) > 1 && args[1] == "--format":
+			// The daemon probe: too slow to answer says nothing about whether
+			// the daemon is up.
+			return "", timeout(args...)
+		case args[0] == "compose":
+			return "", timeout(args...)
+		}
+		return "", timeout(args...)
+	}}
+
+	snap := snapshot.New("local", time.Time{})
+	if err := d.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	want := []string{"docker.compose_version", "docker.daemon_running", "docker.server_version"}
+	got := append([]string(nil), snap.Unmeasured...)
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+	// DaemonRunning still records false, because a bool has no third state. That
+	// is exactly why the key is listed above: the diff must refuse to compare it
+	// rather than read the zero value as an observation.
+	if snap.Docker == nil || snap.Docker.DaemonRunning {
+		t.Errorf("docker section = %+v, want the section present with an unread daemon", snap.Docker)
+	}
+}
+
+// A daemon that answers "not running" is a real observation and must not be
+// suppressed: that is the very state this collector exists to distinguish.
+func TestDownDaemonIsNotMarkedUnmeasured(t *testing.T) {
+	d := &Docker{run: func(_ context.Context, _ string, args ...string) (string, error) {
+		if len(args) > 1 && args[1] == "--format" && strings.Contains(args[2], "Client") {
+			return "29.1.5", nil
+		}
+		return "", errors.New("Cannot connect to the Docker daemon")
+	}}
+
+	snap := snapshot.New("local", time.Time{})
+	if err := d.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("a daemon that answered was marked unmeasured: %v", snap.Unmeasured)
 	}
 }

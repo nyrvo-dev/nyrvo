@@ -75,6 +75,11 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 	// refuses to answer has a reason, and that reason is the useful part: it is
 	// usually the very drift the user is capturing to find.
 	var why error
+	// timedOut records that a probe ran out of time rather than answering. That
+	// is not the same as the runtime being absent, and the difference has to
+	// survive to the snapshot: a binary that exists and was too slow once must
+	// not be published as a machine that lost a tool.
+	timedOut := false
 	for _, p := range c.probes {
 		path, err := collector.LookPath(p.binary)
 		if err != nil {
@@ -100,6 +105,13 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 			// all exit non-zero, and that situation is exactly what Nyrvo is
 			// being run to discover — aborting the capture over it would throw
 			// away every other observation to report the one the user wanted.
+			//
+			// Running out of time is the one failure that says nothing about the
+			// runtime. The binary was found by LookPath a moment ago, so it is
+			// installed; all that is unknown is its version.
+			if collector.IsTimeout(err) {
+				timedOut = true
+			}
 			why = err
 			continue
 		}
@@ -114,6 +126,13 @@ func (c *runtimeCollector) Collect(ctx context.Context, snap *snapshot.Snapshot)
 			Path:    path,
 		})
 		return nil
+	}
+	// A probe that ran out of time leaves the runtime unknown rather than
+	// absent, and the snapshot has to say so. Without this the diff between two
+	// captures of one machine reports a runtime as having disappeared, which is
+	// drift Nyrvo invented rather than drift it observed.
+	if timedOut {
+		snap.MarkUnmeasured("runtime", c.name)
 	}
 	// No probe produced a version; hand the sentinel back wrapped so capture
 	// records the runtime as absent instead of failing. When a probe did run and

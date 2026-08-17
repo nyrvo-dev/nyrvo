@@ -39,6 +39,20 @@ func TestAIAgentDisclosureCoversExecutionBoundary(t *testing.T) {
 	}
 }
 
+// The disclosure is a trust surface: it names the program Nyrvo is about to
+// execute, and a spinner started afterwards erases its own line with "\r\x1b[K".
+// That erase can only be safe if the disclosure ends on a line of its own — the
+// spinner must never be able to touch any line of it.
+func TestAIAgentDisclosureEndsWithNewline(t *testing.T) {
+	var buf bytes.Buffer
+	if err := AIAgentDisclosure(&buf, "claude", []string{"claude", "request"}); err != nil {
+		t.Fatalf("AIAgentDisclosure: %v", err)
+	}
+	if !strings.HasSuffix(buf.String(), "\n") {
+		t.Fatalf("disclosure does not end with a newline, so a spinner could erase a line of it:\n%s", buf.String())
+	}
+}
+
 func TestAIAgentDisclosureElidesOnlyPromptArgument(t *testing.T) {
 	prompt := strings.Repeat("sensitive analysis request ", 200)
 	command := []string{"opencode", "run", "--model", "openai/gpt-5", "--label=doctor run", prompt}

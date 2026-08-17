@@ -57,7 +57,14 @@ func runCIImport(ctx context.Context, args []string, stdout io.Writer) error {
 		return usageErr("ci import takes a run id or run URL, and optionally a job name")
 	}
 
+	// The fetch is the slow part: a paginated run call plus a job log that can
+	// be megabytes. The spinner labels the wait, and on a non-terminal writer —
+	// a pipe, a file, a CI log — it is a silent no-op, so the message below is
+	// byte-identical to what it was before.
+	spinner := output.NewSpinner(stdout)
+	spinner.Start("importing run " + operands[0])
 	imported, err := importRun(ctx, operands[0], operands[1:])
+	spinner.Stop()
 	if err != nil {
 		return err
 	}

@@ -117,6 +117,32 @@ func TestSpinnerStartWhileRunningReplacesLabel(t *testing.T) {
 	}
 }
 
+// The elapsed suffix is a pure function so the threshold can be pinned down
+// without sleeping: under two seconds the line is exactly the label, at or over
+// it the label gains " · Ns" as a bare, never-wrapping count. The 1.9s and 2.1s
+// cases are what make the threshold concrete rather than ornamental.
+func TestSpinnerLineElapsedSuffix(t *testing.T) {
+	tests := []struct {
+		name    string
+		elapsed time.Duration
+		want    string
+	}{
+		{"at zero", 0, "claude"},
+		{"just below threshold", 1900 * time.Millisecond, "claude"},
+		{"just above threshold", 2100 * time.Millisecond, "claude · 2s"},
+		{"under a minute", 59 * time.Second, "claude · 59s"},
+		{"a full minute", 60 * time.Second, "claude · 60s"},
+		{"past an hour", 3661 * time.Second, "claude · 3661s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := spinnerLine("claude", tt.elapsed); got != tt.want {
+				t.Errorf("spinnerLine(%q, %v) = %q, want %q", "claude", tt.elapsed, got, tt.want)
+			}
+		})
+	}
+}
+
 // spinnerStub is a collector that answers immediately, so a capture can be
 // exercised without any real tool being installed.
 type spinnerStub struct{ name string }

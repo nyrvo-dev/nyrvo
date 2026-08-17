@@ -226,7 +226,16 @@ func runAgent(ctx context.Context, stdout, stderr io.Writer, in analysis.Input, 
 		return err
 	}
 
+	// The agent can take minutes, so the wait gets a spinner labelled with the
+	// agent's name. It writes to the same writer as the disclosure — the writer
+	// that already encodes the --json stream choice — and starts only after the
+	// disclosure's final newline, so its "\r\x1b[K" erase can never touch a line
+	// of the disclosure. To a non-terminal writer it is a silent no-op and the
+	// bytes are exactly what they were before the spinner existed.
+	spinner := output.NewSpinner(disclosureTo)
+	spinner.Start(selected.Name())
 	result, err := selected.Analyze(ctx, prompt)
+	spinner.Stop()
 	if err != nil {
 		if errors.Is(err, agent.ErrUnavailable) {
 			return fmt.Errorf("%w; run --ai alone to print the request and paste it yourself", err)
@@ -320,9 +329,14 @@ func evidenceContext(snaps ...*snapshot.Snapshot) []string {
 // now, not as it was whenever someone last ran capture.
 //
 // Progress goes to stderr so a --json diagnosis stays a clean document on
-// stdout.
+// stdout. The import is the slow part — a paginated gh api call plus a job log
+// that can be megabytes — so a spinner runs around it, labels the wait, and is
+// a silent no-op wherever the writer is not a terminal.
 func diagnoseRun(ctx context.Context, ref string, jobOperands []string, stderr io.Writer) (local, ci *snapshot.Snapshot, err error) {
+	spinner := output.NewSpinner(stderr)
+	spinner.Start("importing run " + ref)
 	imported, err := importRun(ctx, ref, jobOperands)
+	spinner.Stop()
 	if err != nil {
 		return nil, nil, err
 	}

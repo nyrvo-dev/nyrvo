@@ -1,6 +1,7 @@
 package output
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -13,8 +14,29 @@ import (
 // right on every tick.
 var spinnerFrames = []rune("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 
-// Spinner animates a progress frame while a collector runs, and erases the line
-// when stopped so the caller's next write lands on a clean line.
+// spinnerElapsedThreshold is the minimum a spinner may run before its line
+// gains an elapsed-seconds suffix. The suffix is automatic: below the threshold
+// the line stays byte-identical to the plain label, so a capture whose
+// collectors finish in milliseconds never shows a number at all, while an agent
+// run or an import that is still going after two seconds always will.
+const spinnerElapsedThreshold = 2 * time.Second
+
+// spinnerLine renders the text drawn after the animated frame. Under
+// spinnerElapsedThreshold the label is returned untouched; at or above it a
+// plain-seconds suffix is appended, so the whole line reads "claude · 47s".
+// Seconds are reported as a bare count — 127s, 3661s, never "2m7s" — because
+// every other shape wraps at a boundary, and a wrapped counter reads as a new,
+// unrelated number to someone who looked away for a moment. Monotonic elapsed
+// time is the one number that only ever grows.
+func spinnerLine(label string, elapsed time.Duration) string {
+	if elapsed < spinnerElapsedThreshold {
+		return label
+	}
+	return fmt.Sprintf("%s · %ds", label, int(elapsed/time.Second))
+}
+
+// Spinner animates a progress frame while a slow operation runs, and erases the
+// line when stopped so the caller's next write lands on a clean line.
 //
 // Whether it animates at all is decided once, in NewSpinner, by the same
 // per-writer rule NewStyle uses for colour. A non-terminal writer — a CI log, a
@@ -75,9 +97,10 @@ func (s *Spinner) run(label string, stop chan struct{}) {
 	// Erasing is what makes this safe to do for fast collectors too. A label
 	// that appears and is erased within milliseconds reads as the line moving
 	// through the collectors, not as a flicker.
+	start := time.Now()
 	for i := 0; ; i++ {
 		frame := string(spinnerFrames[i%len(spinnerFrames)])
-		_, _ = io.WriteString(s.w, "\r"+s.style.Accent(frame)+" "+label)
+		_, _ = io.WriteString(s.w, "\r"+s.style.Accent(frame)+" "+spinnerLine(label, time.Since(start)))
 		select {
 		case <-stop:
 			return

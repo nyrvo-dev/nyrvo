@@ -3,6 +3,8 @@ package githubactions
 import (
 	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -462,6 +464,51 @@ func TestSnapshotSource(t *testing.T) {
 	}
 	if wIdx > jIdx {
 		t.Error("workflow notes should precede job notes")
+	}
+}
+
+// A workflow file is input a repository can publish, and yaml.v3 decodes
+// \x1b escapes inside double-quoted scalars after parsing. Step names, job
+// names, runs-on labels and container images all reach the snapshot as notes,
+// so a control byte in any of them must not survive: a terminal would
+// interpret it, not print it (docs/adr/0011).
+func TestSnapshotNotesStripControlBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ci.yml")
+	body := "name: ci\n" +
+		"on: push\n" +
+		"jobs:\n" +
+		"  build:\n" +
+		"    runs-on: \"ubuntu-latest\\x1b[2J\\x1b[31mEVIL\\x1b[0m\"\n" +
+		"    container: \"node:20\\x1b[2J\\x1b[31mEVIL\\x1b[0m\"\n" +
+		"    steps:\n" +
+		"      - name: \"step\\x1b[2J\\x1b[31mEVIL\\x1b[0m\"\n" +
+		"        if: true\n" +
+		"        run: echo hi\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write workflow: %v", err)
+	}
+	w, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	j := w.Job("build")
+	if j == nil {
+		t.Fatal("job build not parsed")
+	}
+	snap, err := Snapshot(w, j, "n", time.Now())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	for _, n := range snap.Source.Notes {
+		if hasControlByte(n) {
+			t.Errorf("note carries control bytes: %q", n)
+		}
+	}
+	// The readable text survives; only the escapes are gone.
+	joined := strings.Join(snap.Source.Notes, "\n")
+	if !strings.Contains(joined, "EVIL") {
+		t.Errorf("notes lost the visible text: %q", joined)
 	}
 }
 

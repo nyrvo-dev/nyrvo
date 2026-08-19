@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // Run is one workflow run that actually happened, as reported by the GitHub
@@ -300,10 +301,13 @@ func RunSnapshot(r *Run, j *RunJob, name string, now time.Time) (*snapshot.Snaps
 	if ref == "" {
 		ref = fmt.Sprintf("%s run %d job %s", r.Repository, r.ID, j.Name)
 	}
+	// Notes carry job names, step names and runner labels straight from the
+	// API; nothing may arrive in a snapshot carrying a control byte that a
+	// terminal would interpret (docs/adr/0011).
 	snap.Source = &snapshot.Source{
 		Kind:  snapshot.SourceGitHubActionsRun,
 		Ref:   ref,
-		Notes: notes,
+		Notes: textsafe.StripAll(notes),
 	}
 
 	snap.Normalize()

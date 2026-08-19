@@ -1,6 +1,8 @@
 package githubactions
 
 import (
+	"bytes"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -150,7 +152,8 @@ func TestReplay(t *testing.T) {
 				},
 			},
 			want: ReplayPlan{
-				Job: "db",
+				Job:   "db",
+				Steps: []ReplayStep{},
 				Prerequisites: []string{
 					`postgres:15 must be reachable as "postgres"`,
 					`redis:7 must be reachable as "redis"`,
@@ -184,7 +187,7 @@ func TestReplay(t *testing.T) {
 		{
 			name: "job with no steps",
 			job:  &Job{ID: "test"},
-			want: ReplayPlan{Job: "test"},
+			want: ReplayPlan{Job: "test", Steps: []ReplayStep{}},
 		},
 		{
 			name: "nil job",
@@ -299,6 +302,22 @@ func TestReplaySetupVersionFromExpression(t *testing.T) {
 	reason := plan.Steps[0].Reason
 	if !strings.Contains(reason, "which the runner decides") || !strings.Contains(reason, "${{ matrix.go-version }}") {
 		t.Errorf("reason = %q, want it to name the expression and say the runner decides it", reason)
+	}
+}
+
+// TestReplayNoStepsSerializesAsEmptyArray guards the frozen machine contract:
+// a job with no steps must serialize as "steps":[] so a consumer never has to
+// treat null and [] as the same thing.
+func TestReplayNoStepsSerializesAsEmptyArray(t *testing.T) {
+	data, err := json.Marshal(Replay(&Job{ID: "test"}))
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	if !bytes.Contains(data, []byte(`"steps":[]`)) {
+		t.Errorf("steps should serialize as [], got %s", data)
+	}
+	if bytes.Contains(data, []byte("null")) {
+		t.Errorf("plan serialized with a null field: %s", data)
 	}
 }
 

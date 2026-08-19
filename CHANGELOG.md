@@ -13,6 +13,31 @@ not.
 
 Entries for the next release live in `.changes/unreleased/`; see docs/RELEASING.md.
 
+## [0.5.0] — 2026-08-19
+
+### Added
+
+- Every release now carries prebuilt binaries. Pushing a `v*` tag runs a
+  release workflow that cross-compiles Nyrvo for macOS, Linux and Windows
+  (amd64 and arm64), packages each binary with the LICENSE and the README, and
+  attaches the archives and a SHA256SUMS to a GitHub Release. People without a
+  Go toolchain — the JavaScript, Python and PHP developers most likely to hit
+  environment drift — can download a binary instead of being bounced by the
+  first `go install` in the README.
+
+### Fixed
+
+- External tools get longer to answer on Windows. The per-probe deadline was
+  five seconds everywhere, and on Windows that is not enough: every observation
+  the public runner feed has ever failed to measure was on `windows-latest` —
+  `rustc --version` one day, `docker compose version` the next — while the Linux
+  and macOS runners have never missed it once. Spawning a process is dearer
+  there, and a cold image pays for it on the first call. The deadline is now
+  fifteen seconds on Windows and unchanged elsewhere. Nothing was ever reported
+  wrongly, because an expired probe is recorded as unmeasured rather than as
+  absence, but a snapshot that keeps saying "I do not know" is worth less than
+  one that waits a moment longer and finds out.
+
 ## [0.4.0] — 2026-08-18
 
 ### Added
@@ -243,7 +268,8 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...v0.2.0

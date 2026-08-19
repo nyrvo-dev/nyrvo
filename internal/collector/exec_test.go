@@ -211,3 +211,20 @@ func TestIsTimeout(t *testing.T) {
 		}
 	}
 }
+
+// The deadline is longer on Windows for a measured reason: every observation
+// the public runner feed has failed to measure was on windows-latest, and none
+// were on Linux or macOS. Both branches are asserted from any platform, because
+// defaultTimeout takes the operating system rather than reading it.
+func TestDefaultTimeoutIsLongerOnWindows(t *testing.T) {
+	if DefaultTimeout <= 0 {
+		t.Fatalf("DefaultTimeout = %v, want a positive duration", DefaultTimeout)
+	}
+	other := defaultTimeout("linux")
+	if other != defaultTimeout("darwin") {
+		t.Errorf("linux and darwin deadlines differ: %v vs %v", other, defaultTimeout("darwin"))
+	}
+	if win := defaultTimeout("windows"); win <= other {
+		t.Errorf("windows deadline = %v, want more than the %v other platforms get", win, other)
+	}
+}

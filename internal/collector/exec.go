@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -14,11 +15,35 @@ import (
 // answer in milliseconds; anything slower is a hung tool (an unreachable
 // Docker daemon, a network filesystem) that must not stall a capture.
 //
+// It is longer on Windows, and that is not a guess. The public runner feed at
+// runners.nyrvo.dev captures six GitHub-hosted images every day, and every
+// observation it has ever failed to measure was on windows-latest — `rustc
+// --version` one day, `docker compose version` the next — while the Linux and
+// macOS runners have never missed the deadline once. Five seconds is enough
+// time to answer on those platforms and is not on Windows, where spawning a
+// process is dearer and a cold image pays for it on the first call.
+//
+// The consequence of getting this wrong is not a wrong answer — an expired
+// probe is recorded as unmeasured, never as absence, per ADR 0017 — but a
+// snapshot that keeps saying "I do not know" is worth less than one that waits
+// a moment longer and finds out.
+//
 // A variable rather than a constant so a test can shorten it: what happens when
 // a probe runs out of time is now a behaviour worth asserting, and asserting it
-// against the real five seconds would cost five seconds on every CI job. The
-// package is internal, so nothing outside this module can reach it.
-var DefaultTimeout = 5 * time.Second
+// against the real deadline would cost that long on every CI job. The package
+// is internal, so nothing outside this module can reach it.
+var DefaultTimeout = defaultTimeout(runtime.GOOS)
+
+// defaultTimeout takes the operating system as an argument rather than reading
+// runtime.GOOS itself, so both branches can be exercised from a test on any
+// platform. A branch that only runs on one operating system is a branch that is
+// only tested when CI happens to be on it.
+func defaultTimeout(goos string) time.Duration {
+	if goos == "windows" {
+		return 15 * time.Second
+	}
+	return 5 * time.Second
+}
 
 // Run executes an external tool and returns its trimmed stdout.
 //

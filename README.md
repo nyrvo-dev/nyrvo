@@ -24,6 +24,24 @@ differs between local and CI, staging, and production.
 
 ## Install
 
+Every release attaches prebuilt binaries for macOS (amd64, arm64), Linux
+(amd64, arm64) and Windows (amd64, arm64). Download the archive for your
+platform from the [releases page](https://github.com/nyrvo-dev/nyrvo/releases)
+and unpack it:
+
+```
+VERSION=X.Y.Z   # the release you want, without the leading v
+curl -LO https://github.com/nyrvo-dev/nyrvo/releases/download/v$VERSION/nyrvo_${VERSION}_darwin_arm64.tar.gz
+tar -xzf nyrvo_${VERSION}_darwin_arm64.tar.gz
+./nyrvo version
+```
+
+On Windows, the `.zip` archive unpacks to `nyrvo.exe`. Every archive contains
+the binary, the LICENSE and the README, and each release also carries a
+SHA256SUMS you can use to verify the download.
+
+Or, if you have a Go toolchain, install the command directly:
+
 ```
 go install github.com/nyrvo-dev/nyrvo/cmd/nyrvo@latest
 ```

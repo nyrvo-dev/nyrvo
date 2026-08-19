@@ -1,0 +1,81 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: >-
+          The tag to build and release. workflow_dispatch exists so a failed
+          release can be re-run without inventing a new tag; a tag push never
+          sets this.
+        required: true
+        type: string
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    # The only thing this job does is create a release, so it asks for nothing
+    # but the write token `gh release create` uses.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # A tag push checks out its own ref; a manual run checks out the tag
+          # the caller named. Both paths build from a tag, never a branch.
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+
+      - name: Resolve version
+        id: version
+        # The version is whatever tag HEAD sits on. The binaries are built from
+        # this same checkout with no version flag, so their build info stamps
+        # the same tag — the same answer `go install ...@<tag>` produces.
+        run: |
+          tag=$(git describe --tags --exact-match HEAD)
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Cross-compile and package
+        env:
+          CGO_ENABLED: "0"
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            os=${target%/*}
+            arch=${target#*/}
+            name="nyrvo_${VERSION}_${os}_${arch}"
+            bin=nyrvo
+            [ "$os" = windows ] && bin=nyrvo.exe
+            mkdir -p "dist/$name"
+            GOOS=$os GOARCH=$arch go build -o "dist/$name/$bin" ./cmd/nyrvo
+            cp LICENSE README.md "dist/$name/"
+            if [ "$os" = windows ]; then
+              (cd "dist/$name" && zip -q "../$name.zip" "$bin" LICENSE README.md)
+            else
+              (cd "dist/$name" && tar -czf "../$name.tar.gz" "$bin" LICENSE README.md)
+            fi
+          done
+
+      - name: Checksums
+        run: |
+          (cd dist && sha256sum *.tar.gz *.zip) > SHA256SUMS
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            dist/nyrvo_*.tar.gz dist/nyrvo_*.zip SHA256SUMS \
+            --title "$TAG" \
+            --notes "What changed in this release is in [CHANGELOG.md](https://github.com/nyrvo-dev/nyrvo/blob/$TAG/CHANGELOG.md)."

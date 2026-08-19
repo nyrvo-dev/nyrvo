@@ -14,9 +14,16 @@ embeds at build time, so a binary always reports what it actually is. A release
 process that rewrites a source file to say `0.2.0` can be wrong; this one
 cannot.
 
-Prebuilt binaries for people without a Go toolchain are a later decision. They
-are worth adding when someone asks, and not before — every artifact published is
-an artifact that has to be signed, hosted and kept in step with the tags.
+Pushing a tag also runs `.github/workflows/release.yml`, which cross-compiles
+the binary for macOS, Linux and Windows, packages each one with the LICENSE and
+the README, writes a `SHA256SUMS` over the archives, and attaches everything to
+a GitHub Release. The build uses the checked-out tag and no version flag, so
+the archives report exactly the version the tag says — the same answer
+`go install` produces from the same tag. The release is created with the
+runner's own `gh` CLI and the workflow's `GITHUB_TOKEN`; no third-party action
+is handed the token, and the workflow can also be started by hand to rebuild a
+release that went wrong without inventing a new tag. Artifacts are checksummed,
+not signed.
 
 ## What the version number promises
 
@@ -132,7 +139,13 @@ fragments. It deliberately leaves the link definitions at the bottom of
    git push origin main --follow-tags
    ```
 
-8. Confirm the module is fetchable, from a directory that is not the repository:
+8. Watch the release workflow. The tag push triggers
+   `.github/workflows/release.yml`, which cross-compiles the six platform
+   binaries, packages them with the LICENSE and README, writes `SHA256SUMS`,
+   and attaches everything to a GitHub Release pointing at the changelog. If
+   it fails partway, re-run it from the Actions tab (`workflow_dispatch`),
+   naming the same tag — no new tag is invented.
+9. Confirm the module is fetchable, from a directory that is not the repository:
 
    ```
    go install github.com/nyrvo-dev/nyrvo/cmd/nyrvo@vX.Y.Z

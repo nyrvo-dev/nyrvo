@@ -2,6 +2,7 @@ package diagnostic
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/nyrvo-dev/nyrvo/internal/diff"
 	"github.com/nyrvo-dev/nyrvo/internal/finding"
@@ -21,6 +22,12 @@ func RuntimeRules() []Rule {
 			ID: finding.RuntimeMissing,
 			Evaluate: func(in Input) []finding.Finding {
 				return runtimeMissing(in)
+			},
+		},
+		{
+			ID: finding.RuntimeUnusable,
+			Evaluate: func(in Input) []finding.Finding {
+				return runtimeUnusableStandalone(in)
 			},
 		},
 	}
@@ -193,6 +200,68 @@ func runtimeUnusableFinding(lacksSide *snapshot.Snapshot, key, expected string) 
 		Description:    description,
 		Recommendation: recommendation,
 	}
+}
+
+// runtimeUnusableStandalone reports Unusable keys that the missing-runtime
+// rule never saw. MarkUnusable does not append a Runtime, so a local-only
+// refusal produces no difference when the other side is PartialRuntimes
+// (ADR 0008). The refusal is still a fact about this machine and must not
+// be suppressed as if it were an absence the partial side could not testify
+// to. Keys that already appear in the diff are left to runtimeMissing, which
+// converts them to runtime.unusable so the same fact is not charged twice.
+func runtimeUnusableStandalone(in Input) []finding.Finding {
+	reported := map[string]bool{}
+	if in.Diff != nil {
+		for _, d := range in.Diff.Differences {
+			if d.Component == diff.ComponentRuntime && d.Key != "" {
+				reported[d.Key] = true
+			}
+		}
+	}
+	var out []finding.Finding
+	for _, side := range []*snapshot.Snapshot{in.A, in.B} {
+		if side == nil {
+			continue
+		}
+		other := in.B
+		if side == in.B {
+			other = in.A
+		}
+		for _, name := range unusableRuntimeNames(side) {
+			if reported[name] {
+				continue
+			}
+			if other != nil && other.IsUnusable("runtime", name) {
+				// Both sides refused the same runtime. That is a fact about
+				// the project, not drift between the two environments, and
+				// reporting it twice on a clean local-vs-local doctor would
+				// invent a problem the comparison did not find.
+				continue
+			}
+			expected := ""
+			if other != nil {
+				if rt := other.Runtime(name); rt != nil {
+					expected = rt.Version
+				}
+			}
+			out = append(out, runtimeUnusableFinding(side, name, expected))
+		}
+	}
+	return out
+}
+
+func unusableRuntimeNames(s *snapshot.Snapshot) []string {
+	if s == nil {
+		return nil
+	}
+	var names []string
+	for _, k := range s.Unusable {
+		name, ok := strings.CutPrefix(k, "runtime.")
+		if ok && name != "" {
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 // declaredSnapshot returns the snapshot that declares its environment, or nil.

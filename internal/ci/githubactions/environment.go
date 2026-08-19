@@ -127,10 +127,13 @@ func applySystem(snap *snapshot.Snapshot, j *Job, notes *[]string) {
 
 	// A container tells us the OS even when the runner is unknown: containers on
 	// GitHub-hosted runners are always Linux, so the image alone is evidence.
-	// Only the architecture still has to fall back when the runner gave us none.
-	arch := "amd64"
+	// Architecture is not implied by "it is a container": guessing amd64 for an
+	// unknown runner would state a platform nobody identified.
+	arch := ""
 	if sys != nil {
 		arch = sys.Arch
+	} else {
+		*notes = append(*notes, "container architecture was not guessed")
 	}
 	*notes = append(*notes, "job runs in container "+j.Container+"; container OS is linux")
 	snap.System = &snapshot.System{OS: "linux", Arch: arch}

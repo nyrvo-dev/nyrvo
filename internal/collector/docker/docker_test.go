@@ -421,3 +421,52 @@ func TestDownDaemonIsNotMarkedUnmeasured(t *testing.T) {
 		t.Errorf("a daemon that answered was marked unmeasured: %v", snap.Unmeasured)
 	}
 }
+
+// docker ps running out of time is not an observation of no containers. The
+// daemon answered, so the section stays, but services must be unmeasured
+// rather than an empty list that looks like "none running".
+func TestDockerPsTimeoutIsUnmeasuredNotEmpty(t *testing.T) {
+	d := &Docker{run: fakeRun(map[string]fakeResult{
+		clientFormat: {out: "29.4.0"},
+		serverFormat: {out: "29.4.0"},
+		composeShort: {out: "5.1.2"},
+		psFormat:     {err: fmt.Errorf("docker ps: %w", context.DeadlineExceeded)},
+	})}
+	snap := snapshot.New("local", time.Time{})
+	if err := d.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if snap.Docker == nil || !snap.Docker.DaemonRunning {
+		t.Fatalf("docker section = %+v, want a running daemon", snap.Docker)
+	}
+	if len(snap.Services) != 0 {
+		t.Errorf("Services = %+v, want none recorded after a timeout", snap.Services)
+	}
+	if !slices.Contains(snap.Unmeasured, "docker.services") {
+		t.Errorf("Unmeasured = %v, want docker.services", snap.Unmeasured)
+	}
+}
+
+// Parent cancellation during docker ps must still abort the capture.
+func TestDockerPsCancelledContextReturnsCtxErr(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	d := &Docker{run: func(ctx context.Context, name string, args ...string) (string, error) {
+		key := strings.Join(append([]string{name}, args...), " ")
+		if key == psFormat {
+			cancel()
+			return "", ctx.Err()
+		}
+		switch key {
+		case clientFormat, serverFormat:
+			return "29.4.0", nil
+		case composeShort:
+			return "5.1.2", nil
+		}
+		panic("unexpected command: " + key)
+	}}
+	snap := snapshot.New("local", time.Time{})
+	err := d.Collect(ctx, snap)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Collect() error = %v, want context.Canceled", err)
+	}
+}

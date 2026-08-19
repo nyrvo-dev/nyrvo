@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -154,6 +155,63 @@ func TestCollectCancelledContext(t *testing.T) {
 	if snap.Git != nil {
 		t.Errorf("snap.Git = %+v, want nil after cancellation", snap.Git)
 	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("a cancelled capture was marked unmeasured: %v", snap.Unmeasured)
+	}
+}
+
+// A probe deadline is not absence. Returning DeadlineExceeded made capture
+// mark git failed, left snap.Git nil, and the next diff reported the
+// repository as not described — inventing drift from a slow filesystem.
+func TestProbeThatRunsOutOfTimeIsUnmeasuredNotAbsent(t *testing.T) {
+	restore := collector.DefaultTimeout
+	collector.DefaultTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { collector.DefaultTimeout = restore })
+
+	dir := fakeSleepingGit(t)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := snapshot.New("test", time.Now())
+	err := (&git.Git{Dir: t.TempDir()}).Collect(context.Background(), snap)
+
+	// ErrUnavailable, not nil. There is no Git section either way, and nil
+	// would have capture record the section as "ok" — a collector announcing
+	// success for something it never observed. ErrUnavailable is what capture
+	// maps to "skipped", which is what actually happened, and it is explicitly
+	// not StatusFailed: a slow filesystem does not fail a capture.
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Collect() error = %v, must not surface the raw deadline: that is what made capture mark git failed", err)
+	}
+	if snap.Git != nil {
+		t.Fatalf("snap.Git = %+v, want nil: a timeout must not invent a checkout", snap.Git)
+	}
+	want := []string{"git.branch", "git.dirty", "git.sha"}
+	got := append([]string(nil), snap.Unmeasured...)
+	sort.Strings(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+}
+
+func fakeSleepingGit(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	source := "package main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n"
+	if err := os.WriteFile(src, []byte(source), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	out := filepath.Join(dir, "git")
+	if goruntime.GOOS == "windows" {
+		out += ".exe"
+	}
+	if b, err := exec.Command("go", "build", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("build sleeping git: %v: %s", err, b)
+	}
+	return dir
 }
 
 // TestTimedOutGitProbeIsUnmeasuredNotAbsent proves a git that answers every

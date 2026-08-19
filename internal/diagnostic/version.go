@@ -16,7 +16,25 @@ import (
 // Matching is per segment, not per character, so a declared "2" is not
 // satisfied by "20": segment equality is what version numbers actually mean.
 func Satisfies(declared, observed string) bool {
-	return prefixMatch(segments(declared), segments(observed))
+	d, o := segments(declared), segments(observed)
+	if prefixMatch(d, o) {
+		return true
+	}
+	// Java 8 and earlier were numbered 1.8, 1.7, … while setup-java writes
+	// "8". Those are the same major. The rewrite is only applied as a
+	// fallback so a declared "2" still does not match "20", and Go 1.26 stays
+	// a 1.x version rather than becoming 26.
+	return prefixMatch(javaLegacy(d), javaLegacy(o))
+}
+
+// javaLegacy rewrites the pre-9 Java scheme (1.8.0) to the major that
+// setup-java uses (8). Versions whose second segment is above 8 are left
+// alone: Go 1.26 is not Java 26.
+func javaLegacy(segs []int) []int {
+	if len(segs) >= 2 && segs[0] == 1 && segs[1] >= 5 && segs[1] <= 8 {
+		return segs[1:]
+	}
+	return segs
 }
 
 // prefixMatch reports whether every segment a declaration states is matched by

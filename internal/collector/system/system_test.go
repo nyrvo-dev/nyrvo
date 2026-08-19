@@ -2,10 +2,15 @@ package system
 
 import (
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/nyrvo-dev/nyrvo/internal/collector"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
 
@@ -72,4 +77,67 @@ func TestName(t *testing.T) {
 	if got := (System{}).Name(); got != "system" {
 		t.Fatalf("Name() = %q, want %q", got, "system")
 	}
+}
+
+// A missing uname binary is genuine absence of a kernel string, not a probe
+// that failed to finish. The section must stay present with OS/arch and no
+// unmeasured key.
+func TestMissingUnameIsNotUnmeasured(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	snap := snapshot.New("test", time.Now())
+	if err := (System{}).Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if snap.System == nil || snap.System.OS == "" || snap.System.Arch == "" {
+		t.Fatalf("OS/arch missing after a missing uname: %+v", snap.System)
+	}
+	if snap.System.Kernel != "" {
+		t.Errorf("Kernel = %q, want empty when uname is absent", snap.System.Kernel)
+	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("a missing uname was marked unmeasured: %v", snap.Unmeasured)
+	}
+}
+
+// A uname that runs out of time must not look like a machine with no kernel.
+func TestUnameTimeoutIsUnmeasured(t *testing.T) {
+	restore := collector.DefaultTimeout
+	collector.DefaultTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { collector.DefaultTimeout = restore })
+
+	dir := fakeSleepingUname(t)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := snapshot.New("test", time.Now())
+	if err := (System{}).Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	if snap.System == nil || snap.System.OS == "" || snap.System.Arch == "" {
+		t.Fatalf("OS/arch missing after a uname timeout: %+v", snap.System)
+	}
+	if snap.System.Kernel != "" {
+		t.Errorf("Kernel = %q, want empty when uname timed out", snap.System.Kernel)
+	}
+	if got, want := snap.Unmeasured, []string{"system.kernel"}; !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+}
+
+func fakeSleepingUname(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	source := "package main\nimport \"time\"\nfunc main() { time.Sleep(time.Minute) }\n"
+	if err := os.WriteFile(src, []byte(source), 0o600); err != nil {
+		t.Fatalf("write source: %v", err)
+	}
+	out := filepath.Join(dir, "uname")
+	if runtime.GOOS == "windows" {
+		out += ".exe"
+	}
+	if b, err := exec.Command("go", "build", "-o", out, src).CombinedOutput(); err != nil {
+		t.Fatalf("build sleeping uname: %v: %s", err, b)
+	}
+	return dir
 }

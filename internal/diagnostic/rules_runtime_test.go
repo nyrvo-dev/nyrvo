@@ -277,3 +277,56 @@ func TestUnreadRuntimeProducesNoMissingFinding(t *testing.T) {
 		}
 	}
 }
+
+// MarkUnusable does not append a Runtime, so a local-only refusal produces no
+// difference when CI is PartialRuntimes. The refusal is still a fact and must
+// surface as runtime.unusable, not as missing and not as silence.
+func TestUnusableFiresWhenOtherSideIsPartial(t *testing.T) {
+	local := snapshot.New("local", time.Time{})
+	local.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+	local.Unusable = []string{"runtime.dotnet"}
+
+	ci := snapshot.New("ci", time.Time{})
+	ci.Runtimes = []snapshot.Runtime{{Name: "node", Version: "20.1.0"}}
+	ci.PartialRuntimes = true
+	ci.Source = &snapshot.Source{Kind: snapshot.SourceGitHubActions}
+
+	d := diff.Compare(local, ci)
+	findings := evalRule(t, finding.RuntimeUnusable, Input{A: local, B: ci, Diff: d})
+	if len(findings) != 1 {
+		t.Fatalf("findings = %+v, want exactly one unusable", findings)
+	}
+	if findings[0].Rule != finding.RuntimeUnusable || findings[0].Key != "dotnet" {
+		t.Fatalf("finding = %+v, want runtime.unusable for dotnet", findings[0])
+	}
+	if findings[0].Actual == "missing" {
+		t.Error("invented missing for an unusable runtime")
+	}
+
+	missing := evalRule(t, finding.RuntimeMissing, Input{A: local, B: ci, Diff: d})
+	for _, f := range missing {
+		if f.Key == "dotnet" {
+			t.Errorf("partial CI produced a missing finding for a local-only unusable: %+v", f)
+		}
+	}
+}
+
+func TestUnusableEmptyAndNilStayQuiet(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	b := snapshot.New("ci", time.Time{})
+	d := diff.Compare(a, b)
+	if got := evalRule(t, finding.RuntimeUnusable, Input{A: a, B: b, Diff: d}); len(got) != 0 {
+		t.Errorf("empty snapshots produced unusable findings: %+v", got)
+	}
+	if got := evalRule(t, finding.RuntimeUnusable, Input{}); len(got) != 0 {
+		t.Errorf("nil input produced unusable findings: %+v", got)
+	}
+
+	both := snapshot.New("local", time.Time{})
+	both.Unusable = []string{"runtime.java"}
+	other := snapshot.New("other", time.Time{})
+	other.Unusable = []string{"runtime.java"}
+	if got := evalRule(t, finding.RuntimeUnusable, Input{A: both, B: other, Diff: diff.Compare(both, other)}); len(got) != 0 {
+		t.Errorf("identical refusals on both sides produced findings: %+v", got)
+	}
+}

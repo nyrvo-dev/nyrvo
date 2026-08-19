@@ -332,6 +332,13 @@ func evidenceContext(snaps ...*snapshot.Snapshot) []string {
 // stdout. The import is the slow part — a paginated gh api call plus a job log
 // that can be megabytes — so a spinner runs around it, labels the wait, and is
 // a silent no-op wherever the writer is not a terminal.
+// captureForDoctor runs the in-memory capture that one-shot doctor uses. It is
+// a variable so a test can supply a failed result without hanging the real
+// collectors.
+var captureForDoctor = func(ctx context.Context) (*capture.Result, error) {
+	return capture.Run(ctx, defaultCollectors(), capture.Options{Name: defaultDoctorA, Budget: capture.DefaultBudget})
+}
+
 func diagnoseRun(ctx context.Context, ref string, jobOperands []string, stderr io.Writer) (local, ci *snapshot.Snapshot, err error) {
 	spinner := output.NewSpinner(stderr)
 	spinner.Start("importing run " + ref)
@@ -349,9 +356,15 @@ func diagnoseRun(ctx context.Context, ref string, jobOperands []string, stderr i
 		}
 	}
 
-	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{Name: defaultDoctorA, Budget: capture.DefaultBudget})
+	res, err := captureForDoctor(ctx)
 	if err != nil {
 		return nil, nil, err
+	}
+	// The same contract as `nyrvo capture`: a collector that failed outright
+	// is evidence the user needs, not a silently partial machine to diagnose
+	// against. Unavailable optional tools do not count.
+	if res.Failed() {
+		return nil, nil, fmt.Errorf("capture failed; these collectors failed: %s", strings.Join(res.FailedSections(), ", "))
 	}
 	return res.Snapshot, imported.Snapshot, nil
 }

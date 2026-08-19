@@ -95,6 +95,19 @@ func TestPromptWarnsOnlyForPartialEnvironment(t *testing.T) {
 	}
 }
 
+func TestPromptWarnsForPartialRuntimes(t *testing.T) {
+	base := Input{A: &snapshot.Snapshot{Name: "local"}, B: &snapshot.Snapshot{Name: "ci"}}
+	const warning = "A runtime absent from that list is not evidence that the runtime was absent"
+
+	if got := Prompt(base); strings.Contains(got, warning) {
+		t.Errorf("Prompt() warned about a complete runtime list: %q", warning)
+	}
+	base.PartialRuntimes = true
+	if got := Prompt(base); !strings.Contains(got, warning) {
+		t.Errorf("Prompt() does not contain partial-runtimes warning %q", warning)
+	}
+}
+
 func TestPromptStatesAnswerConstraints(t *testing.T) {
 	got := Prompt(Input{})
 	for _, want := range []string{

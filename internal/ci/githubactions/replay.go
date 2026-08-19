@@ -147,9 +147,10 @@ func mergedEnv(jobEnv, stepEnv map[string]string) []string {
 }
 
 // secretRef matches a reference to a secret in any spacing or casing a workflow
-// may use: ${{ secrets.TOKEN }} and ${{secrets.TOKEN}} are the same reference,
-// and matching only the first spelling would print the second one through.
-var secretRef = regexp.MustCompile(`(?i)\$\{\{\s*secrets\s*\.`)
+// may use. Dot form (${{ secrets.TOKEN }}) and the bracket/index form
+// (${{ secrets['TOKEN'] }}, ${{ secrets["TOKEN"] }}) are the same reference,
+// and matching only the first spelling would print the others through.
+var secretRef = regexp.MustCompile(`(?i)\$\{\{\s*secrets\s*(?:\.|\[\s*['"])`)
 
 // envValue redacts anything that could be a resolved secret. The workflow file
 // only ever holds the expression, but the plan is meant to be read and pasted,

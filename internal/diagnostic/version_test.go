@@ -21,6 +21,13 @@ func TestSatisfies(t *testing.T) {
 		{"2", "20.11.1", false},
 		{"1.2", "1.26.6", false},
 
+		// Java 8 is 1.8.0 on the wire (JDK 8's -version) and "8" in setup-java.
+		{"8", "1.8.0", true},
+		{"1.8", "8", true},
+		{"1.8.0", "1.8.0", true},
+		{"8", "11.0.2", false},
+		{"11", "1.8.0", false},
+
 		// Real mismatches.
 		{"22", "24.4.0", false},
 		{"1.25", "1.26.6", false},
@@ -70,5 +77,32 @@ func TestSegmentsStopAtNonNumeric(t *testing.T) {
 	}
 	if got := Distance("1.26.0-rc1", "1.25.0"); got != "minor" {
 		t.Errorf("Distance with a pre-release = %q, want minor", got)
+	}
+}
+
+// The Java 1.x rewrite has an upper bound, and the bound is the whole reason it
+// is safe. Java's old scheme only ever reached 1.8, so 1.5 through 1.8 collapse
+// to their major. Go 1.26 shares that shape and must not: a declared "1.26"
+// satisfied by "26" would silently accept a toolchain 25 versions apart.
+// Widening the guard to any 1.x passes every other test in this file, so this
+// is the one that holds it.
+func TestSatisfiesDoesNotTreatEveryOnePointXAsJavaLegacy(t *testing.T) {
+	for _, tc := range []struct {
+		declared, observed string
+		want               bool
+	}{
+		{"1.8", "8", true},       // real Java legacy
+		{"8", "1.8.0_412", true}, // and the other direction
+		{"1.5", "5", true},
+		{"1.26", "26", false}, // Go, not Java 26
+		{"1.9", "9", false},   // above the legacy scheme
+		{"1.26", "1.26.6", true},
+		{"2", "20", false},  // the original segment rule still holds
+		{"2.8", "8", false}, // only 1.x was Java's old scheme, not any x.8
+		{"1.8", "1.8.0_412", true},
+	} {
+		if got := Satisfies(tc.declared, tc.observed); got != tc.want {
+			t.Errorf("Satisfies(%q, %q) = %v, want %v", tc.declared, tc.observed, got, tc.want)
+		}
 	}
 }

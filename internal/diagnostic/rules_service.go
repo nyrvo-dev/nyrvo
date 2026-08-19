@@ -37,6 +37,11 @@ func evaluateServices(in Input, rule string) []finding.Finding {
 	if declared == nil || observed == nil || len(observed.Services) == 0 {
 		return nil
 	}
+	// docker ps ran out of time: an empty list is not an observation of no
+	// containers, so this rule must not treat it as one.
+	if observed.IsUnmeasured("docker", "services") {
+		return nil
+	}
 
 	var findings []finding.Finding
 	for _, want := range declared.Services {

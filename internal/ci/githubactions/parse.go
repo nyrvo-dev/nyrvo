@@ -158,7 +158,7 @@ func parseJob(id string, raw map[string]any) Job {
 			s := Service{ID: sid}
 			if m, ok := svc[sid].(map[string]any); ok {
 				s.Image, _ = scalarString(m["image"])
-				s.Env = stringMap(m["env"])
+				s.Env = stringMap(m["env"], &j.Notes, jobNote(id, "service "+strconv.Quote(sid)+" env has a non-scalar entry; it is not modelled"))
 			} else {
 				j.Notes = append(j.Notes, jobNote(id, "service "+strconv.Quote(sid)+" is not a mapping; not modelled"))
 			}
@@ -166,7 +166,7 @@ func parseJob(id string, raw map[string]any) Job {
 		}
 	}
 
-	j.Env = stringMap(raw["env"])
+	j.Env = stringMap(raw["env"], &j.Notes, jobNote(id, "env has a non-scalar entry; it is not modelled"))
 
 	if steps, ok := raw["steps"].([]any); ok {
 		for _, sv := range steps {
@@ -215,8 +215,8 @@ func parseStep(jobID string, v any, notes *[]string) Step {
 	s.Uses, _ = scalarString(m["uses"])
 	s.Run, _ = scalarString(m["run"])
 	s.WorkingDirectory, _ = scalarString(m["working-directory"])
-	s.With = stringMap(m["with"])
-	s.Env = stringMap(m["env"])
+	s.With = stringMap(m["with"], notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" with has a non-scalar entry; it is not modelled"))
+	s.Env = stringMap(m["env"], notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" env has a non-scalar entry; it is not modelled"))
 	if _, ok := m["if"]; ok {
 		*notes = append(*notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" if conditions are not modelled"))
 	}
@@ -282,19 +282,37 @@ func scalarList(list []any) ([]string, bool) {
 // stringMap keeps the scalar entries of a decoded mapping. Non-scalar values
 // cannot be reproduced faithfully as text, so they are dropped: an env block
 // is a list of literal assignments, and the literals are the only part Nyrvo
-// claims to understand.
-func stringMap(v any) map[string]string {
+// claims to understand. Skipping them is not silence — ADR 0006 requires a
+// note whenever a recognized construct is left unmodelled.
+func stringMap(v any, notes *[]string, skippedNote string) map[string]string {
+	if v == nil {
+		return nil
+	}
 	m, ok := v.(map[string]any)
 	if !ok {
+		noteSkipped(notes, skippedNote)
 		return nil
 	}
 	out := make(map[string]string, len(m))
+	skipped := false
 	for k, val := range m {
 		if s, ok := scalarString(val); ok {
 			out[k] = s
+		} else {
+			skipped = true
 		}
 	}
+	if skipped {
+		noteSkipped(notes, skippedNote)
+	}
 	return out
+}
+
+func noteSkipped(notes *[]string, msg string) {
+	if notes == nil || msg == "" {
+		return
+	}
+	*notes = append(*notes, msg)
 }
 
 // scalarString returns a scalar value in its literal text form. Integers,

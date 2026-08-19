@@ -3,6 +3,7 @@ package diagnostic
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nyrvo-dev/nyrvo/internal/finding"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
@@ -222,5 +223,35 @@ func TestAPinnedDeclarationStaysAPin(t *testing.T) {
 	}
 	if got := requirementUnsatisfied(Input{A: local, B: &snapshot.Snapshot{Name: "ci"}}); len(got) != 1 {
 		t.Fatalf("a pinned declaration stopped being enforced: %+v", got)
+	}
+}
+
+// A runtime listed as unusable has no Runtime entry, so walking Runtimes
+// alone would stay silent — including when CI is partial and cannot testify
+// to absence. The project still declared a requirement this machine refused.
+func TestRequirementUnsatisfiedForUnusableRuntime(t *testing.T) {
+	local := snapshot.New("local", time.Time{})
+	local.Requirements = []snapshot.Requirement{{Runtime: "dotnet", Constraint: "8.0.0", Source: "global.json"}}
+	local.Unusable = []string{"runtime.dotnet"}
+
+	ci := snapshot.New("ci", time.Time{})
+	ci.PartialRuntimes = true
+	ci.Source = &snapshot.Source{Kind: snapshot.SourceGitHubActions}
+
+	got := evalRule(t, finding.RuntimeRequirementUnsatisfied, Input{A: local, B: ci})
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %+v", len(got), got)
+	}
+	if got[0].Key != "dotnet" || got[0].Actual != "installed, not usable" {
+		t.Errorf("finding = %+v, want requirement_unsatisfied for unusable dotnet", got[0])
+	}
+}
+
+func TestRequirementUnusableEmptyStaysQuiet(t *testing.T) {
+	local := snapshot.New("local", time.Time{})
+	local.Requirements = []snapshot.Requirement{{Runtime: "dotnet", Constraint: "8.0.0", Source: "global.json"}}
+	ci := snapshot.New("ci", time.Time{})
+	if got := evalRule(t, finding.RuntimeRequirementUnsatisfied, Input{A: local, B: ci}); len(got) != 0 {
+		t.Errorf("absent runtime produced a requirement finding: %+v", got)
 	}
 }

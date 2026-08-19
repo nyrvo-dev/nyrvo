@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // DefaultTimeout allows a local agent enough time to reason and respond while
@@ -148,50 +150,12 @@ func (a Agent) Analyze(ctx context.Context, prompt string) (string, error) {
 // for invisible data loss. The banner also says which model replied, which is
 // worth showing under a heading that claims to name the agent.
 func cleanOutput(output string) string {
-	return strings.TrimSpace(stripControlSequences(output))
-}
-
-func stripControlSequences(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] == 0x1b {
-			i = skipEscapeSequence(s, i+1)
-			continue
-		}
-		if s[i] < 0x20 && s[i] != '\n' && s[i] != '\t' {
-			i++
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
-
-func skipEscapeSequence(s string, i int) int {
-	if i >= len(s) {
-		return i
-	}
-	switch s[i] {
-	case '[':
-		for i++; i < len(s); i++ {
-			if s[i] >= 0x40 && s[i] <= 0x7e {
-				return i + 1
-			}
-		}
-	case ']':
-		for i++; i < len(s); i++ {
-			if s[i] == 0x07 {
-				return i + 1
-			}
-			if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-				return i + 2
-			}
-		}
-	default:
-		return i + 1
-	}
-	return len(s)
+	// The same stripper a snapshot goes through, differing only in keeping the
+	// newlines an answer is written in. Keeping a second copy here is how the
+	// two drifted apart: this one scanned bytes, so it mistook the tail of a
+	// multi-byte character for a control introducer and swallowed the rest of
+	// the line.
+	return strings.TrimSpace(textsafe.StripKeepingNewlines(output))
 }
 
 func firstLine(s string) string {

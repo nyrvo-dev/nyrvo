@@ -247,6 +247,22 @@ func TestIsUnusable(t *testing.T) {
 	}
 }
 
+func TestIsUnmeasured(t *testing.T) {
+	s := New("local", time.Time{})
+	s.MarkUnmeasured("docker", "services")
+
+	if !s.IsUnmeasured("docker", "services") {
+		t.Error(`IsUnmeasured("docker", "services") = false, want true`)
+	}
+	if s.IsUnmeasured("docker", "compose_version") {
+		t.Error(`IsUnmeasured("docker", "compose_version") = true, want false`)
+	}
+	var nilSnap *Snapshot
+	if nilSnap.IsUnmeasured("docker", "services") {
+		t.Error("nil IsUnmeasured = true, want false")
+	}
+}
+
 // The field is additive and optional, so a snapshot that measured everything
 // must serialise exactly as it did before this field existed.
 func TestUnmeasuredIsOmittedWhenEverythingWasMeasured(t *testing.T) {

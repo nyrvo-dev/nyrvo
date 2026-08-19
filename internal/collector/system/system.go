@@ -45,7 +45,14 @@ func (System) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 	kernel, err := collector.Run(ctx, "uname", "-r")
 	if err != nil {
 		// uname may be absent in minimal containers, or fail under a cancelled
-		// context; a missing kernel string is not an error, so nothing to report.
+		// context; a missing kernel string is not an error. A probe that ran
+		// out of time is different: OS and arch stay, but an empty kernel
+		// would look like "this machine has no kernel string" rather than "we
+		// asked and did not finish". Caller cancel is ruled out first, because
+		// an inner deadline is then a symptom of the caller's own stop.
+		if ctx.Err() == nil && collector.IsTimeout(err) {
+			snap.MarkUnmeasured("system", "kernel")
+		}
 		return nil
 	}
 	sys.Kernel = kernel

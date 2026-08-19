@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nyrvo-dev/nyrvo/internal/capture"
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
 )
 
@@ -181,6 +183,37 @@ func TestDoctorImportsRunAndDiagnoses(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(".nyrvo", "snapshots", "local.json")); !errors.Is(err, os.ErrNotExist) {
 		t.Error("doctor <run> wrote a local snapshot; it must capture in memory")
+	}
+}
+
+// One-shot doctor must not diagnose a silently partial machine: a collector
+// that failed outright is the same operational error `nyrvo capture` reports.
+func TestDoctorRunFailsWhenACollectorFailed(t *testing.T) {
+	orig := captureForDoctor
+	captureForDoctor = func(context.Context) (*capture.Result, error) {
+		return &capture.Result{
+			Snapshot: snapshot.New("local", time.Time{}),
+			Sections: []capture.SectionResult{
+				{Collector: "git", Status: capture.StatusFailed, Error: "deadline exceeded"},
+			},
+		}, nil
+	}
+	t.Cleanup(func() { captureForDoctor = orig })
+
+	stub := &ciExecStub{
+		runDoc:  readFixture(t, "run-failed.json"),
+		jobsDoc: readFixture(t, "jobs-failed.json"),
+		logDoc:  readLogFixture(t, "log-failure.txt"),
+	}
+	stubCIClient(t, stub)
+	chdirWorkDir(t)
+
+	code, _, errOut := run(t, "doctor", "31921289286")
+	if code != ExitError {
+		t.Fatalf("doctor <run> with a failed collector: exit %d, want %d (stderr: %s)", code, ExitError, errOut)
+	}
+	if !strings.Contains(errOut, "git") {
+		t.Errorf("error does not name the failed collector: %s", errOut)
 	}
 }
 

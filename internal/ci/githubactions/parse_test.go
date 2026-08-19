@@ -297,6 +297,55 @@ func TestParseDirInvalidFile(t *testing.T) {
 	}
 }
 
+func TestParseNotesNonScalarEnvAndWith(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested.yml")
+	writeFixture(t, path, `
+name: nested
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      COMPLEX:
+        nested: true
+    steps:
+      - name: Setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache-dependency-path:
+            - package-lock.json
+        env:
+          TOKEN: x
+          NESTED:
+            inner: 1
+`)
+	w, err := ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile: %v", err)
+	}
+	j := jobByName(t, w, "test")
+	if j.Env["NODE_ENV"] != "test" {
+		t.Errorf("scalar env was dropped: %v", j.Env)
+	}
+	if _, ok := j.Env["COMPLEX"]; ok {
+		t.Errorf("non-scalar env was kept: %v", j.Env)
+	}
+	if !hasNote(j.Notes, "env has a non-scalar entry") {
+		t.Errorf("expected a note about non-scalar env, got %v", j.Notes)
+	}
+	if j.Steps[0].With["node-version"] != "20" {
+		t.Errorf("scalar with was dropped: %v", j.Steps[0].With)
+	}
+	if !hasNote(j.Notes, "with has a non-scalar entry") {
+		t.Errorf("expected a note about non-scalar with, got %v", j.Notes)
+	}
+	if !hasNote(j.Notes, "step \"Setup\" env has a non-scalar entry") {
+		t.Errorf("expected a note about non-scalar step env, got %v", j.Notes)
+	}
+}
+
 func jobByName(t *testing.T, w *Workflow, id string) *Job {
 	t.Helper()
 	j := w.Job(id)

@@ -473,6 +473,22 @@ func (s *Snapshot) IsUnusable(component, key string) bool {
 	return false
 }
 
+// IsUnmeasured reports whether an observation was attempted and did not
+// complete, so a consumer can tell "looked for and not found" apart from
+// "asked and did not finish".
+func (s *Snapshot) IsUnmeasured(component, key string) bool {
+	if s == nil {
+		return false
+	}
+	target := component + "." + key
+	for _, k := range s.Unmeasured {
+		if k == target {
+			return true
+		}
+	}
+	return false
+}
+
 // Runtime returns the runtime with the given name, or nil when absent.
 func (s *Snapshot) Runtime(name string) *Runtime {
 	for i := range s.Runtimes {

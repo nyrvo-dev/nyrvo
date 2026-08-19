@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,6 +17,12 @@ import (
 // the working directory so snapshots follow the repository they describe, and
 // so Nyrvo needs no global state or account.
 const DirName = ".nyrvo"
+
+// maxSnapshotSize caps how much of one snapshot file is read. A snapshot file
+// is local input the store is pointed at, and a generated or hostile file must
+// not exhaust memory just because Nyrvo loaded it. One megabyte is far beyond
+// anything a captured environment legitimately serializes to.
+const maxSnapshotSize = 1 << 20 // 1 MiB
 
 // ErrNotFound is returned when a named snapshot does not exist.
 var ErrNotFound = errors.New("snapshot not found")
@@ -64,9 +71,21 @@ func (s *Store) Save(snap *Snapshot) error {
 	if err := ValidateName(snap.Name); err != nil {
 		return err
 	}
+	if err := snap.Validate(); err != nil {
+		return fmt.Errorf("save snapshot %q: %w", snap.Name, err)
+	}
 	snap.Normalize()
 	data, err := Marshal(snap)
 	if err != nil {
+		return err
+	}
+	// A symlinked .nyrvo or .nyrvo/snapshots would route every write of this
+	// capture — the .gitignore and the snapshot file itself — outside the
+	// repository. Refuse before anything touches disk.
+	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName)); err != nil {
+		return err
+	}
+	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName, "snapshots")); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
@@ -103,6 +122,30 @@ func (s *Store) Save(snap *Snapshot) error {
 	return nil
 }
 
+// checkNoSymlink returns an error when path exists as a symbolic link.
+//
+// The store writes through .nyrvo and .nyrvo/snapshots, and a repository can
+// contain a .nyrvo that is a symlink pointing elsewhere: `nyrvo capture` would
+// then write the .gitignore and every snapshot into the link's target, which
+// may be another repository or any directory the user never consented to
+// touch. A capture must never write outside the repository's own .nyrvo, so the
+// write path refuses to follow a link instead of guessing where the user meant
+// it to go. A path that does not exist yet is fine — it will be created as a
+// real directory.
+func (s *Store) checkNoSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("inspect %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a symbolic link; refusing to write a capture through it", path)
+	}
+	return nil
+}
+
 // writeGitignore makes the snapshot directory ignore itself.
 //
 // Without it, capturing inside a repository leaves an untracked .nyrvo
@@ -116,7 +159,11 @@ func (s *Store) Save(snap *Snapshot) error {
 // tracks its snapshots can empty the file and keep it that way.
 func (s *Store) writeGitignore() error {
 	path := filepath.Join(s.Root, DirName, ".gitignore")
-	if _, err := os.Stat(path); err == nil {
+	// Lstat, not Stat: a broken symlink passes Stat as "not present", and
+	// WriteFile would then create its target through the link — a write outside
+	// the repository. A link that resolves is skipped like any existing file:
+	// this file is written once and never overwritten.
+	if _, err := os.Lstat(path); err == nil {
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("check %s: %w", path, err)
@@ -132,12 +179,24 @@ func (s *Store) Load(name string) (*Snapshot, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(s.path(name))
+	f, err := os.Open(s.path(name))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%q: %w", name, ErrNotFound)
 		}
 		return nil, fmt.Errorf("read snapshot %q: %w", name, err)
+	}
+	// The file is only read, so a failed close carries no lost data to report.
+	defer func() { _ = f.Close() }()
+	// LimitReader keeps the allocation bounded to the cap: an oversized file
+	// costs us one byte of evidence past the cap, not a second copy of its full
+	// content, and never gets parsed.
+	data, err := io.ReadAll(io.LimitReader(f, maxSnapshotSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("read snapshot %q: %w", name, err)
+	}
+	if len(data) > maxSnapshotSize {
+		return nil, fmt.Errorf("snapshot %q is larger than %d bytes; refusing to read it", name, maxSnapshotSize)
 	}
 	var snap Snapshot
 	if err := json.Unmarshal(data, &snap); err != nil {
@@ -145,6 +204,14 @@ func (s *Store) Load(name string) (*Snapshot, error) {
 	}
 	if snap.SchemaVersion > SchemaVersion {
 		return nil, fmt.Errorf("snapshot %q uses schema version %d, this build understands up to %d: upgrade nyrvo", name, snap.SchemaVersion, SchemaVersion)
+	}
+	if err := snap.Validate(); err != nil {
+		return nil, fmt.Errorf("snapshot %q: %w", name, err)
+	}
+	// The name is the identity a user types on the command line; a document
+	// carrying a different one is ambiguous about which environment was meant.
+	if snap.Name != name {
+		return nil, fmt.Errorf("snapshot %q has name %q; load it as %q instead", name, snap.Name, snap.Name)
 	}
 	snap.Normalize()
 	return &snap, nil

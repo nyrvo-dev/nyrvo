@@ -302,8 +302,8 @@ $ nyrvo version
 
 - OS, CPU architecture, and kernel
 - Git commit SHA, branch, and whether the working tree is dirty
-- Go, npm, Node.js, Python, Ruby, PHP, Rust and Java versions (including install
-  paths)
+- Go, Node.js, npm, pnpm, Yarn, Python, Ruby, PHP, Composer, Rust, Java and
+  .NET versions (including install paths)
 - Docker client, server, and compose versions, and whether the daemon answers
 - The container images running here, and the services a CI job declares
 - The version constraints the checked-out project declares
@@ -311,17 +311,36 @@ $ nyrvo version
 - From CI: the runner platform, setup-action runtime versions, declared
   environment variable names, and service containers a job asks for
 
+A probe can also fail to answer, and that is not the same as finding nothing.
+Nyrvo records three outcomes, not two. A tool that is not on PATH is absent. A
+probe that ran out of time is recorded as **unmeasured**: the question was asked
+and never answered, so the diff declines to compare it rather than reporting the
+tool as having vanished — run the capture again to settle it. A tool that is
+installed and *refuses* to report a version is recorded as **unusable**, and is
+reported as "installed, not usable" rather than missing; the usual cause is a
+pinned toolchain the machine does not have, and telling you to install software
+you already have would be worse than saying nothing.
+
 An absent Docker section means Docker is not installed; a present section with
 `daemon_running` false means the CLI is there but the daemon is not answering.
 Those are different facts, and the second is a common reason a compose-backed
 suite passes in CI and fails on a laptop. Docker versions are compared by
 `nyrvo diff` like everything else.
 
-The declared constraints come from `engines.node` and `engines.npm` in
-package.json, the `go` directive in go.mod, `.nvmrc`, `.python-version`,
-`.tool-versions`, `.ruby-version`, the `ruby` directive in a Gemfile,
-`require.php` in composer.json, `rust-toolchain.toml`, `rust-version` in
-Cargo.toml, and `.java-version`, stored verbatim. They are never compared between environments:
+The declared constraints come from `engines.node`, `engines.npm` and
+`packageManager` in package.json, the `go` directive in go.mod, `.nvmrc`,
+`.python-version`, `requires-python` in pyproject.toml, `.tool-versions`,
+`.ruby-version`, the `ruby` directive in a Gemfile, `require.php` in
+composer.json, `rust-toolchain.toml`, `rust-version` in Cargo.toml,
+`global.json`, and `.java-version`. They are stored as written, except where a
+format carries a checksum that is not part of the version — corepack's
+`packageManager` is recorded as `pnpm@9.1.0`, not with its `+sha512…` suffix.
+
+Nyrvo also records whether a constraint is a floor or a pin, because the two
+warrant different findings: a bare `go 1.25` in go.mod is a minimum, while
+`^8.3` in composer.json and `pnpm@9.1.0` are not.
+
+They are never compared between environments:
 both sides normally read the same repository, so diffing them would manufacture
 drift out of provenance. They exist so a rule can call a version wrong, which is
 what `runtime.requirement_unsatisfied` does.

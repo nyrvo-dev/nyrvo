@@ -8,16 +8,31 @@
 package snapshot
 
 import (
+	"errors"
+	"fmt"
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // SchemaVersion is the version of the snapshot document format. Bump it when a
 // change would make an older Nyrvo misread a newer snapshot (renamed field,
 // changed units, changed semantics). Purely additive optional fields do not
 // require a bump.
-const SchemaVersion = 1
+//
+// Version 2 added Unusable, and that is why it is a bump rather than an
+// additive field. The field itself is optional, but it changed what an existing
+// shape *means*: before it, a runtime absent from Runtimes meant "not observed
+// here". After it, the same absence can mean "installed, and it refused to
+// report a version" — the fact is recorded in Unusable instead. A build that
+// predates the field reads a version-2 document, sees no dotnet entry, ignores
+// the key it does not know, and reports dotnet as missing: precisely the
+// untruth the field was added to prevent. An old binary must refuse a document
+// it would misread rather than quietly misreading it, and refusing requires a
+// version it does not recognize.
+const SchemaVersion = 2
 
 // Snapshot is one captured environment.
 //
@@ -262,6 +277,11 @@ func (s *Snapshot) Normalize() {
 	if s == nil {
 		return
 	}
+	// Stripped before anything is sorted or deduplicated, so canonicalization
+	// sees the values that will actually be stored: two entries differing only
+	// by an escape sequence must collapse into one, not survive as a duplicate
+	// pair that looks identical when printed.
+	s.stripControlBytes()
 	s.CreatedAt = s.CreatedAt.UTC()
 	sort.Slice(s.Runtimes, func(i, j int) bool { return s.Runtimes[i].Name < s.Runtimes[j].Name })
 	sort.Slice(s.Services, func(i, j int) bool {
@@ -290,6 +310,133 @@ func (s *Snapshot) Normalize() {
 		sort.Strings(s.Unusable)
 		s.Unusable = slices.Compact(s.Unusable)
 	}
+}
+
+// stripControlBytes removes terminal escape sequences from every string a
+// snapshot carries.
+//
+// The collectors that build a snapshot already sanitize what they store, but a
+// snapshot is also a document Nyrvo reads: one written by an older build, edited
+// by hand, or sent by someone else to be diffed. Sanitizing only on the way in
+// would leave the way out unguarded, and an escape sequence can clear the screen
+// or repaint the lines a person is reading to make a decision (docs/adr/0011).
+// Normalize is the one point every snapshot passes through, whether it was just
+// captured or just loaded.
+//
+// Every string is stripped rather than the subset that looked externally
+// sourced. A first version of this covered notes, services, requirements and
+// runtimes, and missed Source.Ref -- which is workflow-derived, reaches the
+// terminal inside a doctor recommendation, and is forwarded to an agent -- and
+// Environment.Names, which becomes a difference key. Enumerating the risky
+// fields is how that gap appeared; a control byte is never legitimate anywhere
+// in a snapshot, so the rule is now the whole document and there is no list to
+// keep in step with the struct.
+func (s *Snapshot) stripControlBytes() {
+	s.Name = textsafe.Strip(s.Name)
+	if s.Source != nil {
+		s.Source.Kind = textsafe.Strip(s.Source.Kind)
+		s.Source.Ref = textsafe.Strip(s.Source.Ref)
+		s.Source.Notes = textsafe.StripAll(s.Source.Notes)
+	}
+	if s.System != nil {
+		s.System.OS = textsafe.Strip(s.System.OS)
+		s.System.Arch = textsafe.Strip(s.System.Arch)
+		s.System.Kernel = textsafe.Strip(s.System.Kernel)
+	}
+	if s.Docker != nil {
+		s.Docker.ClientVersion = textsafe.Strip(s.Docker.ClientVersion)
+		s.Docker.ServerVersion = textsafe.Strip(s.Docker.ServerVersion)
+		s.Docker.ComposeVersion = textsafe.Strip(s.Docker.ComposeVersion)
+	}
+	if s.Git != nil {
+		s.Git.SHA = textsafe.Strip(s.Git.SHA)
+		s.Git.Branch = textsafe.Strip(s.Git.Branch)
+	}
+	if s.Environment != nil {
+		s.Environment.Names = textsafe.StripAll(s.Environment.Names)
+	}
+	for i := range s.Services {
+		s.Services[i].Image = textsafe.Strip(s.Services[i].Image)
+		s.Services[i].ID = textsafe.Strip(s.Services[i].ID)
+		s.Services[i].Ports = textsafe.StripAll(s.Services[i].Ports)
+	}
+	for i := range s.Requirements {
+		s.Requirements[i].Runtime = textsafe.Strip(s.Requirements[i].Runtime)
+		s.Requirements[i].Constraint = textsafe.Strip(s.Requirements[i].Constraint)
+		s.Requirements[i].Source = textsafe.Strip(s.Requirements[i].Source)
+	}
+	for i := range s.Runtimes {
+		s.Runtimes[i].Name = textsafe.Strip(s.Runtimes[i].Name)
+		s.Runtimes[i].Version = textsafe.Strip(s.Runtimes[i].Version)
+		s.Runtimes[i].Path = textsafe.Strip(s.Runtimes[i].Path)
+	}
+	s.Unmeasured = textsafe.StripAll(s.Unmeasured)
+	s.Unusable = textsafe.StripAll(s.Unusable)
+}
+
+// Validate reports whether the snapshot is internally consistent enough to be
+// trusted as evidence about one environment.
+//
+// It checks invariants of fields this build understands — the document version,
+// and the identity of the keyed collections — and deliberately nothing else: a
+// machine without Docker still produces a valid snapshot with a nil Docker
+// section. Unknown additive fields are not this method's concern either; it
+// only ever sees what this build decoded, and a document that carries extra
+// keys it does not know about is exactly the compatibility ADR 0002 promises.
+func (s *Snapshot) Validate() error {
+	if s == nil {
+		return errors.New("snapshot is nil")
+	}
+	if s.SchemaVersion <= 0 {
+		return fmt.Errorf("schema_version is %d; it must be a positive integer (this build writes %d)", s.SchemaVersion, SchemaVersion)
+	}
+	if s.Name == "" {
+		return errors.New("name is empty; a snapshot must name the environment it describes")
+	}
+	if err := s.validateRuntimes(); err != nil {
+		return err
+	}
+	if err := s.validateRequirements(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// validateRuntimes checks that every runtime has its name and that no name is
+// used twice. Name is the diff key, so two entries sharing one name are not two
+// observations — they are one observation recorded twice, and a diff reading
+// them would invent an entry that does not exist.
+func (s *Snapshot) validateRuntimes() error {
+	seen := make(map[string]int, len(s.Runtimes))
+	for i, r := range s.Runtimes {
+		if r.Name == "" {
+			return fmt.Errorf("runtime %d has no name", i+1)
+		}
+		if prev, ok := seen[r.Name]; ok {
+			return fmt.Errorf("runtime %q appears twice (entries %d and %d)", r.Name, prev+1, i+1)
+		}
+		seen[r.Name] = i
+	}
+	return nil
+}
+
+// validateRequirements checks that every requirement names the runtime it
+// constrains and that no (runtime, source) pair is repeated. The same runtime
+// from different sources is deliberate — .nvmrc and package.json disagreeing is
+// itself a fact worth seeing — so the pair, not the runtime alone, is the key.
+func (s *Snapshot) validateRequirements() error {
+	seen := make(map[string]int, len(s.Requirements))
+	for i, r := range s.Requirements {
+		if r.Runtime == "" {
+			return fmt.Errorf("requirement %d has no runtime", i+1)
+		}
+		key := r.Runtime + "\x00" + r.Source
+		if prev, ok := seen[key]; ok {
+			return fmt.Errorf("requirement for runtime %q from %q appears twice (entries %d and %d)", r.Runtime, r.Source, prev+1, i+1)
+		}
+		seen[key] = i
+	}
+	return nil
 }
 
 // MarkUnmeasured records that an observation was attempted and did not

@@ -57,9 +57,36 @@ ever being rendered as a missing runtime.
   environment variable values out for the same reason.
 - `unmeasured` and `unusable` are additive optional fields, so `SchemaVersion`
   stayed 1. See ADR 0002.
+
+  **Superseded before 1.0.0. `SchemaVersion` is 2.** The reasoning above was
+  wrong, and it was wrong in a way this ADR is specifically about. The *fields*
+  are additive, but adding `unusable` changed what an existing shape *means*:
+  before it, a runtime absent from `runtimes` meant "not observed here"; after
+  it, the same absence can mean "installed, and it refused to report a version",
+  with the fact recorded in `unusable` instead. A build that predates the field
+  reads the newer document, ignores the key it does not understand, sees no
+  entry, and reports the runtime as missing — the exact untruth the field was
+  added to prevent, reintroduced by a reader instead of a writer. ADR 0002's
+  rule is about what a field *means*, not about whether it is optional.
+  RELEASING.md promises an old binary can refuse a document it would misread
+  rather than quietly misreading it, and refusing requires a version it does not
+  recognize. Below 1.0.0 the bump is free; after it, schema 1 would be a
+  permanent population of files old binaries can misread.
 - The cost is real: a snapshot can now say "I do not know" about a runtime, and
   every consumer has to handle a third state rather than a boolean. The diff,
-  the renderer, and the diagnostic rule each had to be taught it. It is worth
+  the renderer, and the diagnostic rule each had to be taught it.
+
+  **This was written as though it had been done. Only the diagnostic rule had
+  been.** `diff`, the terminal renderer and the AI evidence document went on
+  reporting an unusable runtime as `missing` for three releases, so `doctor`
+  said "installed, not usable" while the evidence directly above it said the
+  runtime was absent. That is the fourth shipment of the bug this ADR names, and
+  it shipped inside the ADR that names it. The lesson kept here on purpose:
+  writing down that every consumer was taught is not the same as teaching them,
+  and a claim in a design document is not evidence. Verify each consumer against
+  running code.
+
+  It is worth
   paying because a snapshot that cannot distinguish "not installed" from "did
   not answer" invents drift out of silence, and a diagnosis that tells a user to
   install software they already have destroys trust in every other finding in

@@ -91,6 +91,14 @@ func (s *Store) Save(snap *Snapshot) error {
 	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		return fmt.Errorf("create snapshot directory: %w", err)
 	}
+	// A symlink can appear between the first check and MkdirAll on a hostile or
+	// racing filesystem. Re-check before writing anything through the tree.
+	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName)); err != nil {
+		return err
+	}
+	if err := s.checkNoSymlink(s.dir()); err != nil {
+		return err
+	}
 	// MkdirAll only applies the mode to directories it creates, and an older
 	// 0755 tree would otherwise keep world-readable snapshots. Match the
 	// config store: directories 0700, files 0600.
@@ -188,7 +196,11 @@ func (s *Store) Load(name string) (*Snapshot, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(s.path(name))
+	path := s.path(name)
+	if err := s.checkNoSymlink(path); err != nil {
+		return nil, fmt.Errorf("read snapshot %q: %w", name, err)
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%q: %w", name, ErrNotFound)

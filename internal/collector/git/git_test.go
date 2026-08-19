@@ -249,8 +249,14 @@ func TestTimedOutGitProbeIsUnmeasuredNotAbsent(t *testing.T) {
 	if !errors.Is(err, collector.ErrUnavailable) {
 		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
 	}
-	if snap.Git != nil {
-		t.Fatalf("snap.Git = %+v, want nil when a probe ran out of time", snap.Git)
+	if snap.Git == nil {
+		t.Fatal("snap.Git = nil, want partial git with sha and branch")
+	}
+	if snap.Git.SHA != "0123456789abcdef0123456789abcdef01234567" {
+		t.Errorf("SHA = %q, want the sha the fake git answered", snap.Git.SHA)
+	}
+	if snap.Git.Branch != "main" {
+		t.Errorf("Branch = %q, want main", snap.Git.Branch)
 	}
 	// Only the dirty probe failed; sha and branch were answered. Marking dirty
 	// unmeasured drops exactly the key the diff would otherwise report as

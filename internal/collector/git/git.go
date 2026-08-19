@@ -41,7 +41,7 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		// A timeout here means git never answered even "are we in a work
 		// tree?", so not one of the three facts is known. A refusal is a
 		// genuine "not a repository" and keeps its existing absent behaviour.
-		return g.classify(ctx, snap, err, "sha", "branch", "dirty")
+		return g.classify(ctx, snap, err, nil, "sha", "branch", "dirty")
 	}
 
 	sha, err := g.run(ctx, "rev-parse", "HEAD")
@@ -49,12 +49,12 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		// rev-parse HEAD fails on a fresh repository that has no commits yet;
 		// that is "nothing to observe here", not a broken capture. Only a probe
 		// that ran out of time leaves the repository's state unknown.
-		return g.classify(ctx, snap, err, "sha", "branch", "dirty")
+		return g.classify(ctx, snap, err, nil, "sha", "branch", "dirty")
 	}
 
 	branch, err := g.run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return g.classify(ctx, snap, err, "branch", "dirty")
+		return g.classify(ctx, snap, err, &snapshot.Git{SHA: sha}, "branch", "dirty")
 	}
 	// A detached HEAD reports the literal "HEAD"; recording that string would
 	// confuse diffs, which expect a branch name or nothing at all.
@@ -62,9 +62,11 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		branch = ""
 	}
 
+	partial := &snapshot.Git{SHA: sha, Branch: branch}
+
 	status, err := g.run(ctx, "status", "--porcelain")
 	if err != nil {
-		return g.classify(ctx, snap, err, "dirty")
+		return g.classify(ctx, snap, err, partial, "dirty")
 	}
 
 	snap.Git = &snapshot.Git{
@@ -115,20 +117,24 @@ func (g *Git) run(ctx context.Context, args ...string) (string, error) {
 //
 // Only the keys still unknown at the point of failure are passed: a timeout on
 // `git status` has already learned the sha and the branch, and marking those
-// unmeasured too would decline to compare facts Nyrvo actually holds.
+// unmeasured too would decline to compare facts Nyrvo actually holds. When
+// partial is non-nil, those facts are written into snap.Git so a diff can
+// compare them; Dirty stays at its zero value because a bool cannot mean
+// "unknown" and git.dirty is listed in keys instead.
 //
-// The result wraps ErrUnavailable rather than being nil. There is no Git
-// section to record either way, and returning nil would have capture report the
-// section as "ok" — a collector announcing success for something it never
-// observed, which is the same overstatement in the progress output that
-// unmeasured exists to prevent in the snapshot.
-func (g *Git) classify(ctx context.Context, snap *snapshot.Snapshot, err error, keys ...string) error {
+// The result wraps ErrUnavailable rather than being nil. Returning nil would
+// have capture report the section as "ok" — a collector announcing success
+// for something it never observed.
+func (g *Git) classify(ctx context.Context, snap *snapshot.Snapshot, err error, partial *snapshot.Git, keys ...string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if collector.IsTimeout(err) {
 		for _, k := range keys {
 			snap.MarkUnmeasured("git", k)
+		}
+		if partial != nil {
+			snap.Git = partial
 		}
 		return fmt.Errorf("git: %v: %w", err, collector.ErrUnavailable)
 	}

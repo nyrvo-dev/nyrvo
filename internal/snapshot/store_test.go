@@ -470,10 +470,38 @@ func TestSaveRejectsSymlinkedSnapshotsDir(t *testing.T) {
 		t.Fatalf("Symlink() error = %v", err)
 	}
 
+	s := NewStore(repo)
+	if err := s.Save(newTestSnapshot("local")); err == nil {
+		t.Fatal("Save() through a symlinked snapshots dir returned no error")
+	}
 	if entries, err := os.ReadDir(target); err != nil {
 		t.Fatalf("ReadDir(target) error = %v", err)
 	} else if len(entries) != 0 {
 		t.Fatalf("symlink target was written to: %v", entryNames(entries))
+	}
+}
+
+// A symlinked snapshot file would make Load read a document the user never
+// saved under that name. Refuse rather than follow the link.
+func TestLoadRejectsSymlinkedSnapshotFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	foreign := filepath.Join(t.TempDir(), "foreign.json")
+	if err := os.WriteFile(foreign, []byte(`{"schema_version":1,"name":"local","created_at":"2026-06-15T10:30:00Z"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(foreign) error = %v", err)
+	}
+	link := filepath.Join(s.dir(), "local.json")
+	if err := os.Symlink(foreign, link); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if _, err := s.Load("local"); err == nil {
+		t.Fatal("Load() through a symlinked snapshot returned no error")
 	}
 }
 

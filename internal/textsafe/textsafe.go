@@ -49,11 +49,13 @@ func strip(s string, keepNewlines bool) string {
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		switch {
-		case r == 0x1b, r == 0x9b, r == 0x9d:
+		case r == 0x1b, r == 0x9b, r == 0x9d, r == 0x90, r == 0x9e, r == 0x9f:
 			i = SkipControlSequence(s, i)
 		case r == utf8.RuneError && size == 1 && (s[i] == 0x9b || s[i] == 0x9d):
 			// A lone C1 introducer, which only a raw byte stream produces.
 			i = SkipControlSequence(s, i)
+		case r == utf8.RuneError && size == 1 && (s[i] == 0x90 || s[i] == 0x9e || s[i] == 0x9f):
+			i = skipPayloadSequence(s, i+1)
 		case r == utf8.RuneError && size == 1:
 			// Any other byte that is not valid UTF-8. Dropping it keeps the
 			// result decodable instead of passing the damage along.
@@ -63,9 +65,10 @@ func strip(s string, keepNewlines bool) string {
 			i += size
 		case r < 0x20:
 			i += size
-		case r >= 0x7f && r <= 0x9f:
-			// DEL and the rest of the C1 block. They are controls a terminal
-			// acts on, and none of them belongs in a version string or a note.
+		case r == 0x7f:
+			i += size
+		case r >= 0x80 && r <= 0x9f && r != 0x90 && r != 0x9e && r != 0x9f:
+			// DEL and the rest of the C1 block except DCS/APC/SOS, handled above.
 			i += size
 		default:
 			b.WriteString(s[i : i+size])
@@ -94,6 +97,9 @@ func SkipControlSequence(s string, i int) int {
 			return skipCSI(s, i+1)
 		case 0x9d:
 			return skipOSC(s, i+1)
+		case 0x90, 0x9e, 0x9f:
+			// C1 DCS, APC, and SOS.
+			return skipPayloadSequence(s, i+1)
 		}
 		return i + 1
 	}
@@ -104,6 +110,8 @@ func SkipControlSequence(s string, i int) int {
 		return skipCSI(s, i+size)
 	case 0x9d: // C1 OSC
 		return skipOSC(s, i+size)
+	case 0x90, 0x9e, 0x9f: // C1 DCS, APC, SOS
+		return skipPayloadSequence(s, i+size)
 	default:
 		return i + size
 	}
@@ -118,9 +126,31 @@ func skipEscapeSequence(s string, i int) int {
 		return skipCSI(s, i+1)
 	case ']':
 		return skipOSC(s, i+1)
+	case 'P', 'p', '_', '^':
+		// DCS, SOS, and APC share the same ST/BEL-terminated payload shape.
+		return skipPayloadSequence(s, i+1)
 	default:
 		return i + 1
 	}
+}
+
+// skipPayloadSequence returns the index just past a DCS, APC, or SOS sequence
+// that started immediately after its introducer byte.
+func skipPayloadSequence(s string, i int) int {
+	for i < len(s) {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == 0x07 { // BEL
+			return i + size
+		}
+		if r == 0x9c { // C1 ST
+			return i + size
+		}
+		if r == 0x1b && i+size < len(s) && s[i+size] == '\\' { // ESC \ (7-bit ST)
+			return i + size + 1
+		}
+		i += size
+	}
+	return len(s)
 }
 
 func skipCSI(s string, i int) int {
@@ -160,8 +190,3 @@ func StripAll(notes []string) []string {
 	}
 	return notes
 }
-
-// StripKeepingNewlines is Strip for text that is meant to stay multi-line.
-// An agent's answer is paragraphs; a snapshot field is one line. Both must lose
-// every sequence a terminal would act on, and they differ only in whether a
-// newline is one of them.

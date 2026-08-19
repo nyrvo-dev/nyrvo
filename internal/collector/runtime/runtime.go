@@ -242,6 +242,17 @@ func PHP() collector.Collector {
 	return newCollector("php", probe{binary: "php", args: []string{"--version"}})
 }
 
+// Composer returns a collector for the Composer package manager.
+//
+// It is a runtime here because Composer's version is independent of PHP's, and
+// its resolver changed behaviour across majors: the same composer.json can
+// install different dependency trees under Composer 1 and Composer 2. Nothing
+// in composer.json pins the installed Composer, so only an observation can
+// tell one machine from another.
+func Composer() collector.Collector {
+	return newCollector("composer", probe{binary: "composer", args: []string{"--version"}})
+}
+
 // Rust returns a collector for the Rust toolchain. It probes the compiler
 // rather than cargo: cargo reports its own version, which tracks rustc but is
 // not the version a project's rust-version constraint talks about.

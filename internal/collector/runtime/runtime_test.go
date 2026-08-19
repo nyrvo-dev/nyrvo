@@ -37,6 +37,11 @@ func TestNormalizeVersion(t *testing.T) {
 		{"short go version", "go1.22", "1.22", false},
 		{"release candidate", "Python 3.11.9rc1", "3.11.9", false},
 		{"bare dotnet version", "9.0.100", "9.0.100", false},
+		// Composer's --version appends the build date and time to the version.
+		// The date uses dashes and the time colons, so neither can match the
+		// dotted regexp, and the version itself always comes first anyway.
+		{"composer 2 line", "Composer version 2.10.2 2026-07-01 11:24:45", "2.10.2", false},
+		{"composer 1 line", "Composer version 1.10.26 2022-04-13 16:39:56", "1.10.26", false},
 		{"empty output", "", "", true},
 		{"garbage", "abc", "", true},
 		{"bare v", "v", "", true},
@@ -330,11 +335,63 @@ func main() {
 	return dir
 }
 
+// The composer probe must read the version out of a line that also carries the
+// build date and time. composer.json never pins Composer's own version, so the
+// observation is the only record a machine's Composer leaves to compare.
+func TestCollectComposer(t *testing.T) {
+	dir := fakeProbe(t, "composer", "Composer version 2.10.2 2026-07-01 11:24:45\n", "", 0)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := &snapshot.Snapshot{}
+	c := Composer()
+
+	if got := c.Name(); got != "composer" {
+		t.Fatalf("Name() = %q, want %q", got, "composer")
+	}
+	if err := c.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Composer().Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 {
+		t.Fatalf("got %d runtimes, want 1", len(snap.Runtimes))
+	}
+	rt := snap.Runtimes[0]
+	if rt.Name != "composer" {
+		t.Fatalf("Runtime.Name = %q, want %q", rt.Name, "composer")
+	}
+	if rt.Version != "2.10.2" {
+		t.Fatalf("Runtime.Version = %q, want %q", rt.Version, "2.10.2")
+	}
+	if rt.Path == "" {
+		t.Error("Runtime.Path is empty, want a path from LookPath")
+	}
+}
+
+// The composer 1 probe must survive the same build-date line a composer 2
+// probe does; the resolver differences between the majors are exactly what the
+// runtime exists to observe.
+func TestCollectComposer1(t *testing.T) {
+	dir := fakeProbe(t, "composer", "Composer version 1.10.26 2022-04-13 16:39:56\n", "", 0)
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := &snapshot.Snapshot{}
+	c := Composer()
+
+	if err := c.Collect(context.Background(), snap); err != nil {
+		t.Fatalf("Composer().Collect: %v", err)
+	}
+	if len(snap.Runtimes) != 1 {
+		t.Fatalf("got %d runtimes, want 1", len(snap.Runtimes))
+	}
+	if got, want := snap.Runtimes[0].Version, "1.10.26"; got != want {
+		t.Fatalf("Runtime.Version = %q, want %q", got, want)
+	}
+}
+
 func TestEveryRuntimeHasADistinctName(t *testing.T) {
 	// The name is the diff key and the string a requirement matches on. Two
 	// collectors sharing one would silently overwrite each other's observation.
 	seen := map[string]bool{}
-	for _, c := range []collector.Collector{Go(), Node(), NPM(), PNPM(), Yarn(), Python(), Ruby(), PHP(), Rust(), Java(), DotNet()} {
+	for _, c := range []collector.Collector{Go(), Node(), NPM(), PNPM(), Yarn(), Python(), Ruby(), PHP(), Composer(), Rust(), Java(), DotNet()} {
 		if seen[c.Name()] {
 			t.Fatalf("two runtime collectors are both named %q", c.Name())
 		}

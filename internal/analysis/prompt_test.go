@@ -133,6 +133,56 @@ func TestPromptCarriesTheInstallPath(t *testing.T) {
 	}
 }
 
+// A runtime that refused to answer is neither absent nor measured (ADR 0017's
+// third state). Without it the agent reads absence while the finding below it
+// says the opposite, so both the unusable refusal and the unmeasured probe are
+// printed next to the runtimes.
+func TestPromptReportsUnmeasuredAndUnusable(t *testing.T) {
+	got := Prompt(Input{
+		A: &snapshot.Snapshot{Name: "laptop"},
+		B: &snapshot.Snapshot{
+			Name:       "ci",
+			Runtimes:   []snapshot.Runtime{{Name: "go", Version: "1.26.0"}},
+			Unmeasured: []string{"runtime.npm"},
+			Unusable:   []string{"runtime.dotnet"},
+		},
+	})
+	for _, want := range []string{
+		"runtimes installed but refusing to report a version",
+		"runtime.dotnet",
+		"probes that did not answer (left unmeasured)",
+		"runtime.npm",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Prompt() does not contain %q:\n%s", want, got)
+		}
+	}
+}
+
+// The difference line carries the same third state the environment block does.
+// An empty side normally renders "(not recorded)", which an agent reads as
+// absence — the exact untruth the unusable flag exists to prevent, restated on
+// the line a reader looks at first.
+func TestPromptDifferenceLineNamesARefusal(t *testing.T) {
+	got := Prompt(Input{
+		A: &snapshot.Snapshot{Name: "laptop"},
+		B: &snapshot.Snapshot{Name: "ci"},
+		Differences: []diff.Difference{{
+			Component: "runtime",
+			Key:       "dotnet",
+			Kind:      diff.KindOnlyInA,
+			A:         "8.0.100",
+			BUnusable: true,
+		}},
+	})
+	if !strings.Contains(got, "B=installed, not usable") {
+		t.Errorf("difference line does not name the refusal:\n%s", got)
+	}
+	if strings.Contains(got, "B=(not recorded)") {
+		t.Errorf("difference line still reads a refusal as absence:\n%s", got)
+	}
+}
+
 func TestPromptTiesFindingsToTheEvidence(t *testing.T) {
 	got := Prompt(Input{
 		A: &snapshot.Snapshot{Name: "local"},

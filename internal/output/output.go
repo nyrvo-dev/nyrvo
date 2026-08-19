@@ -98,6 +98,7 @@ func DiffText(w io.Writer, res *diff.Result) error {
 		writePartialEnvironmentNote(&b, res)
 		writePartialRuntimesNote(&b, res)
 		writeUnmeasuredNote(&b, res)
+		writeUnusableNote(&b, res)
 		_, err := io.WriteString(w, b.String())
 		return err
 	}
@@ -127,12 +128,13 @@ func DiffText(w io.Writer, res *diff.Result) error {
 		fmt.Fprintf(&b, "  %s\n", d.Key)
 		// Both sides are always shown, with an absent observation spelled out,
 		// so a reader never has to infer which environment lacks something.
-		fmt.Fprintf(&b, "    %s\t%s\n", res.A, valueOr(d.A))
-		fmt.Fprintf(&b, "    %s\t%s\n", res.B, valueOr(d.B))
+		fmt.Fprintf(&b, "    %s\t%s\n", res.A, sideValue(d.A, d.AUnusable))
+		fmt.Fprintf(&b, "    %s\t%s\n", res.B, sideValue(d.B, d.BUnusable))
 	}
 	writePartialEnvironmentNote(&b, res)
 	writePartialRuntimesNote(&b, res)
 	writeUnmeasuredNote(&b, res)
+	writeUnusableNote(&b, res)
 	return writeAligned(w, b.String())
 }
 
@@ -170,6 +172,19 @@ func writeUnmeasuredNote(b *strings.Builder, res *diff.Result) {
 	b.WriteString("compared. Unmeasured is not missing: run the capture again to settle it.\n")
 }
 
+// writeUnusableNote reports that the comparison includes a runtime that was
+// installed but refused to report a version. That refusal is deterministic and
+// is usually the drift being sought, so it is kept as a difference rather than
+// dropped; this note keeps a reader from mistaking it for an absence.
+func writeUnusableNote(b *strings.Builder, res *diff.Result) {
+	if !res.Unusable {
+		return
+	}
+	b.WriteString("\nA runtime was installed but refused to report a version. That is recorded\n")
+	b.WriteString("as \"installed, not usable\", not as missing: the tool is present, and the\n")
+	b.WriteString("usual cause is a pinned toolchain this machine does not have.\n")
+}
+
 // SnapshotList renders stored snapshot names.
 func SnapshotList(w io.Writer, names []string) error {
 	if len(names) == 0 {
@@ -203,6 +218,18 @@ func valueOr(v string) string {
 		return "missing"
 	}
 	return v
+}
+
+// sideValue renders one side of a difference. An empty value is normally
+// "missing", but a side that recorded the observation as installed yet refusing
+// to answer must not read as absent: the tool is on PATH, it just would not
+// report a version. The diff distinguishes the two, so the terminal keeps them
+// apart too — this is the word the diagnostic rule uses for the same state.
+func sideValue(v string, unusable bool) string {
+	if unusable {
+		return "installed, not usable"
+	}
+	return valueOr(v)
 }
 
 func title(s string) string {

@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -150,6 +154,165 @@ func TestCollectCancelledContext(t *testing.T) {
 	if snap.Git != nil {
 		t.Errorf("snap.Git = %+v, want nil after cancellation", snap.Git)
 	}
+}
+
+// TestTimedOutGitProbeIsUnmeasuredNotAbsent proves a git that answers every
+// probe but runs out of time on the last one records the unread fact as
+// unmeasured instead of letting the missing section read as "not a repository".
+//
+// This is the ADR 0017 bug shape shipped three times in other collectors: a
+// question Nyrvo could not answer became a negative answer. Dirty is a bool
+// with no "unknown" value (internal/snapshot/snapshot.go), so the unmeasured
+// list is the only way the snapshot can say the question was never answered;
+// without it a diff between two captures of one machine reports git as having
+// vanished.
+func TestTimedOutGitProbeIsUnmeasuredNotAbsent(t *testing.T) {
+	// The deadline has to cover the probes this test needs to SUCCEED, and it
+	// is competing with `go test ./...` compiling every other package: spawning
+	// a small binary is milliseconds on an idle machine and occasionally whole
+	// seconds on a saturated one. At two seconds this test failed intermittently
+	// with sha and branch marked unmeasured too, because the probe that was
+	// supposed to answer did not get scheduled in time — a flake that asserts
+	// the wrong thing rather than a real regression. The sleeping probe sleeps a
+	// full minute, so a generous deadline still separates the two cases cleanly
+	// and only the timing-out probe pays for it.
+	restore := collector.DefaultTimeout
+	collector.DefaultTimeout = 10 * time.Second
+	t.Cleanup(func() { collector.DefaultTimeout = restore })
+
+	dir := fakeGit(t, "--porcelain")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := snapshot.New("test", time.Now())
+	err := (&git.Git{}).Collect(context.Background(), snap)
+
+	// Still unavailable to the capture engine: there is no complete Git section
+	// to record, so the capture must not fail over a probe that ran out of time.
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if snap.Git != nil {
+		t.Fatalf("snap.Git = %+v, want nil when a probe ran out of time", snap.Git)
+	}
+	// Only the dirty probe failed; sha and branch were answered. Marking dirty
+	// unmeasured drops exactly the key the diff would otherwise report as
+	// absent, and the whole-section absence is suppressed by the git.* prefix.
+	if got, want := snap.Unmeasured, []string{"git.dirty"}; !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+	// A timeout proves nothing about whether the repository is usable, so it
+	// must never be recorded as unusable — a refusal is a fact, a timeout is a
+	// question.
+	if len(snap.Unusable) != 0 {
+		t.Errorf("a probe that ran out of time was marked unusable: %v", snap.Unusable)
+	}
+}
+
+// TestFirstGitProbeTimingOutMarksTheWholeSectionUnmeasured covers the other end
+// of the same bug: when even the work-tree question runs out of time, nothing
+// at all is known about the directory, so all three facts must be unmeasured or
+// the diff reports the section as absent for a repository git simply did not
+// answer about.
+func TestFirstGitProbeTimingOutMarksTheWholeSectionUnmeasured(t *testing.T) {
+	restore := collector.DefaultTimeout
+	collector.DefaultTimeout = 10 * time.Second
+	t.Cleanup(func() { collector.DefaultTimeout = restore })
+
+	dir := fakeGit(t, "--is-inside-work-tree")
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	snap := snapshot.New("test", time.Now())
+	err := (&git.Git{}).Collect(context.Background(), snap)
+
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if got, want := snap.Unmeasured, []string{"git.sha", "git.branch", "git.dirty"}; !slices.Equal(got, want) {
+		t.Errorf("Unmeasured = %v, want %v", got, want)
+	}
+	if snap.Git != nil {
+		t.Errorf("snap.Git = %+v, want nil", snap.Git)
+	}
+}
+
+// TestTimedOutGitIsNotMarkedUnmeasuredForGenuineAbsence pins the boundary of
+// the unmeasured mark: a timeout marks only the facts that did not answer. A
+// directory that is not a work tree is a real observation and stays absent
+// without any unmeasured key, exactly as before the fix.
+func TestTimedOutGitIsNotMarkedUnmeasuredForGenuineAbsence(t *testing.T) {
+	requireGit(t)
+
+	dir := t.TempDir()
+	snap := snapshot.New("test", time.Now())
+	err := (&git.Git{Dir: dir}).Collect(context.Background(), snap)
+
+	if !errors.Is(err, collector.ErrUnavailable) {
+		t.Fatalf("Collect() error = %v, want it to wrap ErrUnavailable", err)
+	}
+	if len(snap.Unmeasured) != 0 {
+		t.Errorf("a genuine absence was marked unmeasured: %v", snap.Unmeasured)
+	}
+}
+
+// fakeGit puts a git-shaped binary on PATH that answers the probes the
+// collector asks — a work tree, a HEAD sha, a branch — except for the last
+// arguments named in sleepArgs, which sleep past the probe deadline.
+//
+// It is compiled Go rather than a shell script so it behaves identically on
+// Windows, where shebangs mean nothing and the fakes never ran. The sleeping
+// variant keeps the test short: a probe that outlives a 50ms deadline needs a
+// real timeout, not a second of test time.
+func fakeGit(t *testing.T, sleepArgs ...string) string {
+	t.Helper()
+	quoted := make([]string, len(sleepArgs))
+	for i, s := range sleepArgs {
+		quoted[i] = strconv.Quote(s)
+	}
+	source := fmt.Sprintf(`package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+	"time"
+)
+
+func main() {
+	args := os.Args[1:]
+	last := args[len(args)-1]
+	for _, s := range []string{%s} {
+		if last == s {
+			time.Sleep(time.Minute)
+		}
+	}
+	joined := strings.Join(args, " ")
+	switch {
+	case strings.Contains(joined, "--is-inside-work-tree"):
+		fmt.Print("true")
+	case strings.Contains(joined, "--abbrev-ref"):
+		fmt.Print("main")
+	case joined == "rev-parse HEAD":
+		fmt.Print("0123456789abcdef0123456789abcdef01234567")
+	}
+}
+`, strings.Join(quoted, ", "))
+
+	dir := t.TempDir()
+	src := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(src, []byte(source), 0o600); err != nil {
+		t.Fatalf("write fake git source: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module nyrvofakegit\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatalf("write fake git module: %v", err)
+	}
+	name := "git"
+	if goruntime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if out, err := exec.Command("go", "build", "-o", filepath.Join(dir, name), src).CombinedOutput(); err != nil {
+		t.Fatalf("build fake git: %v: %s", err, out)
+	}
+	return dir
 }
 
 // initRepo creates a repository with a deterministic default branch so the

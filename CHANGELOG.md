@@ -13,6 +13,189 @@ not.
 
 Entries for the next release live in `.changes/unreleased/`; see docs/RELEASING.md.
 
+## [0.6.0] — 2026-08-19
+
+### Changed
+
+- On Windows, AI agent prompts longer than the CreateProcess argument limit are
+  passed on stdin with `-` as the final argv element instead of being truncated.
+
+- GitHub Actions job logs now contribute observed versions for java, ruby, php,
+  dotnet, pnpm, and rust when setup actions print the usual lines.
+
+- Java 1.x ↔ 8 version matching in `Satisfies` now applies only when the
+  runtime is `java`, so Go 1.8 no longer satisfies a declared `8`.
+
+- The snapshot schema version is now 2. The `unusable` field added in v0.2.0 is
+  optional, but it changed what an existing shape means: a runtime absent from
+  `runtimes` used to mean "not observed", and can now mean "installed, and it
+  refused to report a version". A build that predates the field would read a
+  newer document, ignore the key it does not know, and report that runtime as
+  missing — the untruth the field exists to prevent. Bumping the version makes
+  an older Nyrvo refuse the document instead of quietly misreading it. Snapshots
+  written with schema 1 are still read normally.
+
+- `.tool-versions` aliases now include npm, pnpm, yarn, composer, and dotnet
+  (including `dotnet-core`).
+
+- Workflow YAML reads are capped at 1 MiB and fetched job logs at 10 MiB so a
+  pathological repository cannot exhaust memory during import.
+
+### Fixed
+
+- The AI evidence document now carries `PartialRuntimes` and warns an
+  agent the same way it already warned about a partial environment list.
+
+- The failure excerpt of an imported job log is now bounded end to end. The
+  excerpt rule capped the output lines before the first error, but then kept
+  every `##[error]` line, so a step that printed one error per output line
+  turned a 10MB log into 43,000 "Log:" notes and an 8MB snapshot. Only the
+  first 50 error lines are kept now, and a note says how many more were
+  dropped — a prefix that silently cut the rest would overstate what the log
+  actually said.
+
+- A capture now bounds its own total running time. Every external tool already
+  had its own deadline, but nothing bounded their sum: a capture spawns up to 24
+  processes, so a machine where each one hangs — a stalled network filesystem, a
+  wedged Docker daemon — spent the total of every deadline before returning,
+  roughly two minutes here and six on Windows, with a spinner turning and no
+  indication it would ever stop. The budget is a minute (three on Windows, where
+  every probe is allowed three times as long), far above a healthy capture's two
+  seconds. A capture that exceeds it produces no snapshot and says which
+  collector it gave up in: the collectors that never ran would leave their
+  sections absent, and absence in a snapshot means "looked for and not found",
+  so saving a partial capture would report the machine as lacking every tool the
+  capture never reached.
+
+- A job that runs in a container on an unknown runner still records Linux,
+  but no longer guesses `amd64` for the architecture.
+
+- A `docker ps` probe that ran out of time is marked unmeasured instead of
+  leaving an empty service list that looked like no containers were
+  running. Cancelling the capture still aborts.
+
+- `nyrvo doctor --json` emits `"findings": []` for a clean diagnosis instead of
+  `"findings": null`, matching `nyrvo diff --json`. A consumer reading
+  `findings.length` no longer has to special-case the healthy answer.
+
+- `nyrvo doctor <run>` now fails when a collector failed outright, the same
+  way `nyrvo capture` does, instead of diagnosing a silently partial
+  machine.
+
+Fixed git status timeout preserving sha and branch in the snapshot while marking only dirty as unmeasured.
+
+- A git probe that runs out of time is no longer reported as "not a repository".
+  `git status` hanging on a cold filesystem made the collector return the raw
+  deadline error, capture marked the section failed, and the snapshot carried no
+  git section at all — so a diff reported "git described in A, not described in
+  B" for a machine whose git probe merely timed out, the same invented drift
+  ADR 0017 records for npm, docker compose, and dotnet. A timed-out probe now
+  records the facts it could not read (`git.sha`, `git.branch`, `git.dirty`) in
+  the snapshot's `unmeasured` list and leaves the section absent, so the diff
+  drops those keys instead of treating silence as absence. A directory that is
+  not a work tree and a repository with no commits are still genuine answers and
+  are unchanged.
+
+- A declared Java version of `8` now satisfies an observed `1.8.0`, which
+  is how JDK 8 reports itself, without treating `2` as a prefix of `20`.
+
+- Nested `env` and `with` maps in a workflow file are noted as unmodelled
+  instead of disappearing silently.
+
+- Released binaries report their version instead of `v0.5.0+dirty`. Go stamps a
+  binary as dirty when `git status` is not clean, and the release workflow built
+  into an untracked `dist/` inside the repository, which was enough to trigger
+  it — so the v0.5.0 archives each claimed to be a modified build of the tag
+  they were cut from. The build now happens outside the working tree. The
+  release step is also re-runnable now: `gh release create` refuses to run
+  twice, which defeated the `workflow_dispatch` retry that exists for exactly
+  this situation, so an existing release is updated in place instead.
+
+- Replay redacts GitHub Actions secret references written in bracket form
+  (`secrets['TOKEN']`, `secrets["TOKEN"]`) the same way it already redacted
+  the dot form, so those values print as `<secret>`.
+
+- `nyrvo ci replay --json` serializes a job with no steps as `"steps": []`
+  instead of `"steps": null`. The steps slice is part of the machine contract,
+  and a consumer should not have to treat `null` and `[]` as the same thing:
+  "no steps" is a fact, not an unknown.
+
+- Snapshot directories are created `0700`, matching the documented contract
+  and the user config store, instead of `0755`.
+
+- Saving a snapshot refuses to follow a symlink at `.nyrvo`,
+  `.nyrvo/snapshots`, or `.nyrvo/.gitignore`, so a planted link cannot
+  redirect writes outside the repository.
+
+Fixed snapshot Load refusing symlinked files and Save re-checking for symlinks after MkdirAll.
+
+- Loading a snapshot is capped at 1 MiB, and a document whose
+  `schema_version` is missing or whose `name` disagrees with the requested
+  snapshot is refused rather than trusted as evidence.
+
+- The snapshot loader now refuses documents too incomplete to describe an
+  environment instead of answering confidently from them. `schema_version` must
+  be present and positive, a snapshot must carry a name matching the file it is
+  stored as, and the keyed collections (runtimes, requirements) must have their
+  identity and no duplicate keys. `nyrvo diff empty empty` on a `{}` document —
+  previously "No differences between  and ." — and `nyrvo doctor` against a
+  schema-version-0 file now fail loudly. Snapshot files are also read through a
+  1 MiB cap, so a hostile or generated file cannot exhaust memory at load.
+
+- Terminal escape sequences can no longer reach a snapshot through CI metadata.
+  A job log's output was already stripped of ANSI and other control bytes, but
+  step names, job names, runs-on labels and container images were copied into
+  `Source.Notes` verbatim — and those notes are printed by `nyrvo ci inspect`
+  and embedded in the AI prompt. A workflow file could carry a container image
+  like `node:20\x1b[2J` and emit a real clear-screen to the terminal. Every
+  note a workflow file or a run's API contributes is sanitized now, so nothing
+  a terminal would interpret instead of print survives into a snapshot.
+
+Fixed textsafe stripping DCS, APC, and SOS terminal sequences in full.
+ SOS is consumed too, in both its 7-bit (ESC X) and C1 (U+0098) forms: the case list carried 'p', which is not an introducer at all, so an SOS payload passed through as text a terminal would still act on.
+
+- Terminal sanitization now consumes OSC sequences and 8-bit C1
+  introducers, not only CSI, so a loaded snapshot cannot retain an escape
+  sequence in fields that reach the terminal.
+
+- A `uname` probe that ran out of time is recorded as unmeasured rather
+  than as a machine with no kernel string. A missing uname binary still
+  leaves the kernel field empty.
+
+- A runtime that is installed but refuses to report a version is no longer
+  reported as "missing". `nyrvo diff` prints "installed, not usable" for that
+  side, `diff --json` carries `a_unusable`/`b_unusable` flags plus a top-level
+  `unusable` so a consumer can tell "not installed" from "installed, refused",
+  and the AI evidence document lists the refused runtime instead of letting an
+  agent read absence while the finding below it says the opposite. This is the
+  deterministic counterpart to `unmeasured` from ADR 0017: unlike an unmeasured
+  probe, a refusal is not dropped — it is usually the very drift being sought.
+  The kernel version is also compared symmetrically now: a workflow-derived
+  snapshot cannot state one, so a one-sided kernel no longer prints "kernel: ci
+  missing" on every local-vs-CI diff.
+
+- A runtime listed as unusable is visible to requirement and
+  `runtime.unusable` rules even when the other side is a partial runtime
+  list, instead of disappearing because `MarkUnusable` does not append a
+  Runtime entry.
+
+### Security
+
+- A capture is refused when `.nyrvo` or `.nyrvo/snapshots` is a symbolic link.
+  A repository can commit such a link, and every write of a capture — the
+  `.gitignore` and each snapshot — would otherwise follow it to a directory
+  outside the repository that the user never consented to touch.
+
+- Terminal control bytes are stripped from every string a snapshot carries, on
+  the way out as well as the way in. Collectors already sanitized what they
+  store, but a snapshot is also a document Nyrvo reads: one from an older build,
+  hand-edited, or sent by somebody else to diff. The first pass covered notes,
+  services, requirements and runtimes and missed `Source.Ref` — which is
+  workflow-derived and reaches the terminal inside a `doctor` recommendation and
+  the `--ai` request — and the environment variable names the diff prints as
+  keys. Enumerating the risky fields is what left that gap, so the whole document
+  is stripped now.
+
 ## [0.5.0] — 2026-08-19
 
 ### Added
@@ -268,7 +451,8 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...v0.3.0

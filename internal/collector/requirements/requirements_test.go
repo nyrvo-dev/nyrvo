@@ -140,6 +140,11 @@ func TestToolVersionsKnownToolsOnly(t *testing.T) {
 golang 1.26.1
 python 3.11
 ruby 3.2.2
+npm 10.2.0
+pnpm 9.1.0
+yarn 1.22.22
+composer 2.7.0
+dotnet-core 8.0.100
 terraform 1.9.0
 `)
 
@@ -151,10 +156,15 @@ terraform 1.9.0
 	// downstream can match a runtime Nyrvo does not observe. ruby is kept now
 	// that it is one Nyrvo does.
 	want := []snapshot.Requirement{
+		req("composer", "2.7.0", ".tool-versions"),
+		req("dotnet", "8.0.100", ".tool-versions"),
 		req("go", "1.26.1", ".tool-versions"),
 		req("node", "20.11.1", ".tool-versions"),
+		req("npm", "10.2.0", ".tool-versions"),
+		req("pnpm", "9.1.0", ".tool-versions"),
 		req("python", "3.11", ".tool-versions"),
 		req("ruby", "3.2.2", ".tool-versions"),
+		req("yarn", "1.22.22", ".tool-versions"),
 	}
 	if !reflect.DeepEqual(snap.Requirements, want) {
 		t.Fatalf("requirements = %v, want %v", snap.Requirements, want)

@@ -15,16 +15,19 @@ import (
 //
 // Matching is per segment, not per character, so a declared "2" is not
 // satisfied by "20": segment equality is what version numbers actually mean.
-func Satisfies(declared, observed string) bool {
+//
+// runtime scopes which legacy rules apply. Java 8 was numbered 1.8 on the wire
+// while setup-java writes "8"; that rewrite applies only to java so Go 1.8
+// does not satisfy a declared "8".
+func Satisfies(runtime, declared, observed string) bool {
 	d, o := segments(declared), segments(observed)
 	if prefixMatch(d, o) {
 		return true
 	}
-	// Java 8 and earlier were numbered 1.8, 1.7, … while setup-java writes
-	// "8". Those are the same major. The rewrite is only applied as a
-	// fallback so a declared "2" still does not match "20", and Go 1.26 stays
-	// a 1.x version rather than becoming 26.
-	return prefixMatch(javaLegacy(d), javaLegacy(o))
+	if runtime == "java" {
+		return prefixMatch(javaLegacy(d), javaLegacy(o))
+	}
+	return false
 }
 
 // javaLegacy rewrites the pre-9 Java scheme (1.8.0) to the major that

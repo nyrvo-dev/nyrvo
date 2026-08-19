@@ -255,6 +255,20 @@ func TestParseFileInvalid(t *testing.T) {
 	}
 }
 
+func TestParseFileOversized(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "huge.yml")
+	if err := os.WriteFile(path, make([]byte, maxWorkflowSize+1), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	_, err := ParseFile(path)
+	if err == nil {
+		t.Fatal("ParseFile() error = nil, want size limit error")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error = %v, want file size limit message", err)
+	}
+}
+
 func TestParseDir(t *testing.T) {
 	dir := t.TempDir()
 	writeFixture(t, filepath.Join(dir, "b.yaml"), "name: B\njobs: {}\n")

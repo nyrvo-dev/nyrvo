@@ -127,3 +127,30 @@ func TestStripKeepingNewlinesDiffersOnlyByNewlines(t *testing.T) {
 		t.Error("Strip kept a newline")
 	}
 }
+
+// The four string-type sequences all carry a payload terminated by ST or BEL,
+// and all four have to be consumed whole. Skipping only the introducer leaves
+// the payload as text a terminal still acts on. SOS was missed in both forms:
+// the 7-bit case list had 'p', which is not an introducer at all, instead of
+// 'X', and the C1 list omitted U+0098.
+func TestStripConsumesEveryStringTypeSequence(t *testing.T) {
+	const esc = "\x1b"
+	const st = esc + "\\"
+	for _, tc := range []struct{ name, in string }{
+		{"DCS ESC P", "a" + esc + "Ppayload" + st + "b"},
+		{"SOS ESC X", "a" + esc + "Xpayload" + st + "b"},
+		{"PM ESC ^", "a" + esc + "^payload" + st + "b"},
+		{"APC ESC _", "a" + esc + "_payload" + st + "b"},
+		{"C1 DCS", "a\u0090payload\u009cb"},
+		{"C1 SOS", "a\u0098payload\u009cb"},
+		{"C1 PM", "a\u009epayload\u009cb"},
+		{"C1 APC", "a\u009fpayload\u009cb"},
+		{"BEL terminated", "a" + esc + "Ppayload\ab"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Strip(tc.in); got != "ab" {
+				t.Errorf("Strip(%q) = %q, want %q: the payload leaked", tc.in, got, "ab")
+			}
+		})
+	}
+}

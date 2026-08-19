@@ -269,6 +269,32 @@ func observeRuntime(runtimes map[string]string, group, line string) {
 	case strings.HasPrefix(line, "Successfully set up CPython (") && strings.HasSuffix(line, ")"):
 		v := strings.TrimSuffix(strings.TrimPrefix(line, "Successfully set up CPython ("), ")")
 		recordRuntime(runtimes, "python", v)
+	case strings.HasPrefix(line, "Installed Java version: "):
+		v := strings.TrimSuffix(strings.TrimSpace(strings.TrimPrefix(line, "Installed Java version: ")), ".")
+		recordRuntime(runtimes, "java", v)
+	case group == "Environment details" && strings.HasPrefix(line, "java: "):
+		recordRuntime(runtimes, "java", strings.TrimSpace(strings.TrimPrefix(line, "java: ")))
+	case strings.HasPrefix(line, "Using Ruby version: "):
+		recordRuntime(runtimes, "ruby", strings.TrimPrefix(line, "Using Ruby version: "))
+	case group == "Environment details" && strings.HasPrefix(line, "ruby: "):
+		recordRuntime(runtimes, "ruby", strings.TrimSpace(strings.TrimPrefix(line, "ruby: ")))
+	case strings.HasPrefix(line, "PHP "):
+		rest := strings.TrimSpace(strings.TrimPrefix(line, "PHP "))
+		if field, _, _ := strings.Cut(rest, " "); field != "" {
+			recordRuntime(runtimes, "php", field)
+		}
+	case strings.HasPrefix(line, "Installed .NET SDK version "):
+		recordRuntime(runtimes, "dotnet", strings.TrimSpace(strings.TrimPrefix(line, "Installed .NET SDK version ")))
+	case strings.HasPrefix(line, "Installed pnpm version "):
+		recordRuntime(runtimes, "pnpm", strings.TrimSpace(strings.TrimPrefix(line, "Installed pnpm version ")))
+	case strings.Contains(line, "info: syncing channel updates for '"):
+		const prefix = "info: syncing channel updates for '"
+		start := strings.Index(line, prefix) + len(prefix)
+		if end := strings.Index(line[start:], "'"); end >= 0 {
+			channel := line[start : start+end]
+			v, _, _ := strings.Cut(channel, "-")
+			recordRuntime(runtimes, "rust", v)
+		}
 	}
 }
 

@@ -19,6 +19,11 @@ import (
 // wait, not fail.
 const fetchTimeout = 30 * time.Second
 
+// maxJobLogSize caps how much of one job log is read into memory. ParseJobLog
+// already bounds what it keeps, but the raw download must not exhaust memory
+// on a runaway log.
+const maxJobLogSize = 10 << 20 // 10 MiB
+
 // runRef identifies a workflow run: a repository and a run id.
 type runRef struct {
 	// Repo is "owner/name", or empty to let gh resolve the repository from the
@@ -147,13 +152,23 @@ func (c *Client) FetchJobLog(ctx context.Context, repo string, jobID int64) ([]b
 
 	log, err := c.exec(ctx, "api", "--allow-escape-sequences", path)
 	if err == nil {
+		if len(log) > maxJobLogSize {
+			return nil, fmt.Errorf("fetch log for job %d: log exceeds %d bytes", jobID, maxJobLogSize)
+		}
 		return log, nil
 	}
 	// Older gh releases have no such flag and no such refusal: they simply emit
 	// the log. Retrying without it keeps those versions working instead of
 	// requiring an upgrade for a flag that only exists to protect terminals.
 	if strings.Contains(err.Error(), "unknown flag") || strings.Contains(err.Error(), "--allow-escape-sequences") {
-		return c.exec(ctx, "api", path)
+		log, err = c.exec(ctx, "api", path)
+		if err != nil {
+			return nil, fmt.Errorf("fetch log for job %d: %w", jobID, err)
+		}
+		if len(log) > maxJobLogSize {
+			return nil, fmt.Errorf("fetch log for job %d: log exceeds %d bytes", jobID, maxJobLogSize)
+		}
+		return log, nil
 	}
 	return nil, fmt.Errorf("fetch log for job %d: %w", jobID, err)
 }

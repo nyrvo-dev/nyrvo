@@ -67,7 +67,7 @@ func versionMismatchFinding(in Input, d diff.Difference) (finding.Finding, bool)
 		if declaredB {
 			declared, observed = d.B, d.A
 		}
-		if Satisfies(declared, observed) {
+		if Satisfies(d.Key, declared, observed) {
 			return finding.Finding{}, false
 		}
 		expected, actual = declared, observed

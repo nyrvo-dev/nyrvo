@@ -2,6 +2,7 @@ package githubactions
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,13 +12,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// maxWorkflowSize caps how much of one workflow file is read. A repository can
+// contain generated or hostile YAML; refusing oversized files matches the cap
+// on snapshot and requirement sources.
+const maxWorkflowSize = 1 << 20 // 1 MiB
+
 // ParseFile reads and parses one workflow file, setting the returned
 // workflow's Path to the file it came from. A file that parses but declares no
 // jobs is not an error: it is simply a workflow with nothing to observe.
 func ParseFile(path string) (*Workflow, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxWorkflowSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(data) > maxWorkflowSize {
+		return nil, fmt.Errorf("%s: file exceeds %d bytes", path, maxWorkflowSize)
 	}
 
 	var raw map[string]any

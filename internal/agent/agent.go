@@ -7,8 +7,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +21,14 @@ import (
 // DefaultTimeout allows a local agent enough time to reason and respond while
 // still preventing a stalled process from blocking doctor indefinitely.
 const DefaultTimeout = 10 * time.Minute
+
+// maxPromptArgLen is a conservative margin under Windows' ~8191-character
+// CreateProcess limit. Prompts longer than this are passed on stdin with "-"
+// as the final argument so the disclosed argv stays within the platform cap.
+const maxPromptArgLen = 7000
+
+// stdinPromptArg is the placeholder argv element when the real prompt is on stdin.
+const stdinPromptArg = "-"
 
 // ErrUnavailable lets callers distinguish installation guidance from an agent
 // process that started and failed.
@@ -42,16 +52,17 @@ var agents = map[string]Agent{
 	"opencode": {name: "opencode", argv: []string{"opencode", "run"}},
 }
 
-type executeFunc func(ctx context.Context, argv []string, dir string) (stdout, stderr string, err error)
+type executeFunc func(ctx context.Context, argv []string, dir string, stdin io.Reader) (stdout, stderr string, err error)
 
-var execute executeFunc = func(ctx context.Context, argv []string, dir string) (string, string, error) {
+var execute executeFunc = func(ctx context.Context, argv []string, dir string, stdin io.Reader) (string, string, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	// A nil stdin is intentional: codex otherwise consumes Nyrvo's non-terminal
-	// stdin as additional input that was never part of the disclosed request.
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
 }
@@ -75,12 +86,19 @@ func Names() []string {
 
 func (a Agent) Name() string { return a.name }
 
+func (a Agent) usesStdinPrompt(prompt string) bool {
+	return runtime.GOOS == "windows" && len(prompt) > maxPromptArgLen
+}
+
 // Command returns the exact argument vector Analyze will execute. It exists so
 // the user can be shown what is about to run, which is only worth anything if
 // the two cannot drift apart.
 func (a Agent) Command(prompt string) []string {
 	argv := make([]string, len(a.argv), len(a.argv)+1)
 	copy(argv, a.argv)
+	if a.usesStdinPrompt(prompt) {
+		return append(argv, stdinPromptArg)
+	}
 	return append(argv, prompt)
 }
 
@@ -118,7 +136,12 @@ func (a Agent) Analyze(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
-	stdout, stderr, err := execute(ctx, argv, dir)
+	var stdin io.Reader
+	if a.usesStdinPrompt(prompt) {
+		stdin = strings.NewReader(prompt)
+	}
+
+	stdout, stderr, err := execute(ctx, argv, dir, stdin)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return "", fmt.Errorf("%s not found: %w", a.name, ErrUnavailable)

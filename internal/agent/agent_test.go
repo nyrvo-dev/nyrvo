@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -55,7 +57,7 @@ func TestCommand(t *testing.T) {
 func TestAnalyzeExecutesDisclosedCommand(t *testing.T) {
 	a, _ := Lookup("codex")
 	want := a.Command("analyze")
-	withExecutor(t, func(_ context.Context, argv []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, argv []string, _ string, _ io.Reader) (string, string, error) {
 		if !reflect.DeepEqual(argv, want) {
 			t.Fatalf("executed argv = %q, disclosed argv = %q", argv, want)
 		}
@@ -68,7 +70,7 @@ func TestAnalyzeExecutesDisclosedCommand(t *testing.T) {
 
 func TestAnalyzeStripsTerminalFormatting(t *testing.T) {
 	a, _ := Lookup("opencode")
-	withExecutor(t, func(_ context.Context, _ []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, _ string, _ io.Reader) (string, string, error) {
 		return "\x1b[1mThe answer\x1b[0m\r\n", "", nil
 	})
 	got, err := a.Analyze(context.Background(), "analyze")
@@ -85,7 +87,7 @@ func TestAnalyzeStripsTerminalFormatting(t *testing.T) {
 func TestAnalyzePassesPromptAsOneArgument(t *testing.T) {
 	a, _ := Lookup("claude")
 	prompt := "$(id) `whoami`;rm -rf /\nsecond line"
-	withExecutor(t, func(_ context.Context, argv []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, argv []string, _ string, _ io.Reader) (string, string, error) {
 		if len(argv) != 3 {
 			t.Fatalf("argv = %q, want exactly three elements", argv)
 		}
@@ -101,7 +103,7 @@ func TestAnalyzePassesPromptAsOneArgument(t *testing.T) {
 
 func TestAnalyzeRejectsEmptyOutput(t *testing.T) {
 	a, _ := Lookup("claude")
-	withExecutor(t, func(_ context.Context, _ []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, _ string, _ io.Reader) (string, string, error) {
 		return " \n\x1b[0m", "", nil
 	})
 	_, err := a.Analyze(context.Background(), "analyze")
@@ -112,7 +114,7 @@ func TestAnalyzeRejectsEmptyOutput(t *testing.T) {
 
 func TestAnalyzeReportsMissingBinary(t *testing.T) {
 	a, _ := Lookup("claude")
-	withExecutor(t, func(_ context.Context, _ []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, _ string, _ io.Reader) (string, string, error) {
 		return "", "", exec.ErrNotFound
 	})
 	_, err := a.Analyze(context.Background(), "analyze")
@@ -123,7 +125,7 @@ func TestAnalyzeReportsMissingBinary(t *testing.T) {
 
 func TestAnalyzeReportsFailureWithFirstStderrLine(t *testing.T) {
 	a, _ := Lookup("codex")
-	withExecutor(t, func(_ context.Context, _ []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, _ string, _ io.Reader) (string, string, error) {
 		return "", "first failure\nmore detail", errors.New("exit status 1")
 	})
 	_, err := a.Analyze(context.Background(), "analyze")
@@ -144,7 +146,7 @@ func TestAnalyzeReportsFailureWithFirstStderrLine(t *testing.T) {
 func TestAnalyzeUsesAndRemovesEmptyWorkingDirectory(t *testing.T) {
 	a, _ := Lookup("opencode")
 	var dir string
-	withExecutor(t, func(_ context.Context, _ []string, gotDir string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, gotDir string, _ io.Reader) (string, string, error) {
 		dir = gotDir
 		info, err := os.Stat(gotDir)
 		if err != nil {
@@ -179,7 +181,7 @@ func withExecutor(t *testing.T, fake executeFunc) {
 
 func TestAnalyzeKeepsEveryLineOfTheAnswer(t *testing.T) {
 	a, _ := Lookup("opencode")
-	withExecutor(t, func(_ context.Context, _ []string, _ string) (string, string, error) {
+	withExecutor(t, func(_ context.Context, _ []string, _ string, _ io.Reader) (string, string, error) {
 		// An answer may legitimately open with a blockquote, which is exactly
 		// what an agent's banner line looks like. Deleting one deletes the other.
 		return "\x1b[32m> the strongest candidate is the node mismatch\x1b[0m\nbecause package.json requires >=24\n", "", nil
@@ -191,5 +193,40 @@ func TestAnalyzeKeepsEveryLineOfTheAnswer(t *testing.T) {
 	want := "> the strongest candidate is the node mismatch\nbecause package.json requires >=24"
 	if got != want {
 		t.Fatalf("Analyze() = %q, want %q", got, want)
+	}
+}
+
+func TestCommandLongPromptUsesStdinOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("stdin prompt fallback applies only on Windows")
+	}
+	a, _ := Lookup("claude")
+	prompt := strings.Repeat("x", maxPromptArgLen+1)
+	if got := a.Command(prompt); !reflect.DeepEqual(got, []string{"claude", "-p", stdinPromptArg}) {
+		t.Fatalf("Command() = %q, want stdin placeholder on Windows", got)
+	}
+}
+
+func TestAnalyzePassesLongPromptOnStdinOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("stdin prompt fallback applies only on Windows")
+	}
+	a, _ := Lookup("claude")
+	prompt := strings.Repeat("y", maxPromptArgLen+1)
+	withExecutor(t, func(_ context.Context, argv []string, _ string, stdin io.Reader) (string, string, error) {
+		if !reflect.DeepEqual(argv, []string{"claude", "-p", stdinPromptArg}) {
+			t.Fatalf("argv = %q, want stdin placeholder", argv)
+		}
+		body, err := io.ReadAll(stdin)
+		if err != nil {
+			t.Fatalf("ReadAll(stdin): %v", err)
+		}
+		if string(body) != prompt {
+			t.Fatalf("stdin = %q, want full prompt", body)
+		}
+		return "ok", "", nil
+	})
+	if _, err := a.Analyze(context.Background(), prompt); err != nil {
+		t.Fatalf("Analyze() error = %v", err)
 	}
 }

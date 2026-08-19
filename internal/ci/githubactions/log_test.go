@@ -263,6 +263,32 @@ func TestJobLogSkipsNonDottedVersion(t *testing.T) {
 	}
 }
 
+func TestJobLogExtraRuntimes(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    string
+		version string
+	}{
+		{"java setup line", "2026-08-16T00:00:00.0000000Z Installed Java version: 17.0.9.\n", "java", "17.0.9"},
+		{"java env details", "2026-08-16T00:00:00.0000000Z ##[group]Environment details\n2026-08-16T00:00:00.0000000Z java: 11.0.22\n2026-08-16T00:00:00.0000000Z ##[endgroup]\n", "java", "11.0.22"},
+		{"ruby setup line", "2026-08-16T00:00:00.0000000Z Using Ruby version: 3.2.2\n", "ruby", "3.2.2"},
+		{"ruby env details", "2026-08-16T00:00:00.0000000Z ##[group]Environment details\n2026-08-16T00:00:00.0000000Z ruby: 3.3.0\n2026-08-16T00:00:00.0000000Z ##[endgroup]\n", "ruby", "3.3.0"},
+		{"php version line", "2026-08-16T00:00:00.0000000Z PHP 8.2.12 (cli)\n", "php", "8.2.12"},
+		{"dotnet sdk", "2026-08-16T00:00:00.0000000Z Installed .NET SDK version 8.0.100\n", "dotnet", "8.0.100"},
+		{"pnpm", "2026-08-16T00:00:00.0000000Z Installed pnpm version 9.1.0\n", "pnpm", "9.1.0"},
+		{"rust channel", "2026-08-16T00:00:00.0000000Z info: syncing channel updates for '1.78.0-x86_64-unknown-linux-gnu'\n", "rust", "1.78.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jl := ParseJobLog([]byte(tt.raw))
+			if len(jl.Runtimes) != 1 || jl.Runtimes[0].Name != tt.want || jl.Runtimes[0].Version != tt.version {
+				t.Errorf("runtimes = %+v, want %s %s", jl.Runtimes, tt.want, tt.version)
+			}
+		})
+	}
+}
+
 // fixtureEnvPairs reads the env: block of a recorded log — the exact strings
 // the leak test must keep out of the parsed result.
 func fixtureEnvPairs(t *testing.T, raw []byte) []struct{ key, value string } {

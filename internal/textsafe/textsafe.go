@@ -49,12 +49,12 @@ func strip(s string, keepNewlines bool) string {
 	for i := 0; i < len(s); {
 		r, size := utf8.DecodeRuneInString(s[i:])
 		switch {
-		case r == 0x1b, r == 0x9b, r == 0x9d, r == 0x90, r == 0x9e, r == 0x9f:
+		case r == 0x1b, r == 0x9b, r == 0x9d, r == 0x90, r == 0x98, r == 0x9e, r == 0x9f:
 			i = SkipControlSequence(s, i)
 		case r == utf8.RuneError && size == 1 && (s[i] == 0x9b || s[i] == 0x9d):
 			// A lone C1 introducer, which only a raw byte stream produces.
 			i = SkipControlSequence(s, i)
-		case r == utf8.RuneError && size == 1 && (s[i] == 0x90 || s[i] == 0x9e || s[i] == 0x9f):
+		case r == utf8.RuneError && size == 1 && (s[i] == 0x90 || s[i] == 0x98 || s[i] == 0x9e || s[i] == 0x9f):
 			i = skipPayloadSequence(s, i+1)
 		case r == utf8.RuneError && size == 1:
 			// Any other byte that is not valid UTF-8. Dropping it keeps the
@@ -67,8 +67,10 @@ func strip(s string, keepNewlines bool) string {
 			i += size
 		case r == 0x7f:
 			i += size
-		case r >= 0x80 && r <= 0x9f && r != 0x90 && r != 0x9e && r != 0x9f:
-			// DEL and the rest of the C1 block except DCS/APC/SOS, handled above.
+		case r >= 0x80 && r <= 0x9f && r != 0x90 && r != 0x98 && r != 0x9e && r != 0x9f:
+			// The rest of the C1 block. The four string-type introducers are
+			// handled above, because they own a payload rather than standing
+			// alone.
 			i += size
 		default:
 			b.WriteString(s[i : i+size])
@@ -97,8 +99,8 @@ func SkipControlSequence(s string, i int) int {
 			return skipCSI(s, i+1)
 		case 0x9d:
 			return skipOSC(s, i+1)
-		case 0x90, 0x9e, 0x9f:
-			// C1 DCS, APC, and SOS.
+		case 0x90, 0x98, 0x9e, 0x9f:
+			// C1 DCS, SOS, PM and APC.
 			return skipPayloadSequence(s, i+1)
 		}
 		return i + 1
@@ -110,7 +112,7 @@ func SkipControlSequence(s string, i int) int {
 		return skipCSI(s, i+size)
 	case 0x9d: // C1 OSC
 		return skipOSC(s, i+size)
-	case 0x90, 0x9e, 0x9f: // C1 DCS, APC, SOS
+	case 0x90, 0x98, 0x9e, 0x9f: // C1 DCS, SOS, PM, APC
 		return skipPayloadSequence(s, i+size)
 	default:
 		return i + size
@@ -126,8 +128,11 @@ func skipEscapeSequence(s string, i int) int {
 		return skipCSI(s, i+1)
 	case ']':
 		return skipOSC(s, i+1)
-	case 'P', 'p', '_', '^':
-		// DCS, SOS, and APC share the same ST/BEL-terminated payload shape.
+	case 'P', 'X', '^', '_':
+		// The string-type sequences: DCS (P), SOS (X), PM (^) and APC (_).
+		// All four carry a payload terminated by ST or BEL, so all four have
+		// to be consumed whole. Skipping only the introducer leaves the
+		// payload as text a terminal would still act on.
 		return skipPayloadSequence(s, i+1)
 	default:
 		return i + 1

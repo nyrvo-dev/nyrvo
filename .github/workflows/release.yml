@@ -50,32 +50,50 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
+          # Build outside the working tree. Go stamps a binary "+dirty" when
+          # `git status` is not clean, and an untracked dist/ inside the
+          # repository is enough to trigger it: v0.5.0 shipped reporting
+          # "v0.5.0+dirty" for exactly that reason. The version stamp is the
+          # only thing telling a user what they downloaded, so it must not
+          # depend on where this script happens to put its scratch files.
+          dist="$(mktemp -d)"
+          echo "dist=$dist" >> "$GITHUB_ENV"
           for target in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             os=${target%/*}
             arch=${target#*/}
             name="nyrvo_${VERSION}_${os}_${arch}"
             bin=nyrvo
             [ "$os" = windows ] && bin=nyrvo.exe
-            mkdir -p "dist/$name"
-            GOOS=$os GOARCH=$arch go build -o "dist/$name/$bin" ./cmd/nyrvo
-            cp LICENSE README.md "dist/$name/"
+            mkdir -p "$dist/$name"
+            GOOS=$os GOARCH=$arch go build -o "$dist/$name/$bin" ./cmd/nyrvo
+            cp LICENSE README.md "$dist/$name/"
             if [ "$os" = windows ]; then
-              (cd "dist/$name" && zip -q "../$name.zip" "$bin" LICENSE README.md)
+              (cd "$dist/$name" && zip -q "../$name.zip" "$bin" LICENSE README.md)
             else
-              (cd "dist/$name" && tar -czf "../$name.tar.gz" "$bin" LICENSE README.md)
+              (cd "$dist/$name" && tar -czf "../$name.tar.gz" "$bin" LICENSE README.md)
             fi
           done
 
       - name: Checksums
         run: |
-          (cd dist && sha256sum *.tar.gz *.zip) > SHA256SUMS
+          (cd "$dist" && sha256sum *.tar.gz *.zip > SHA256SUMS)
 
       - name: Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "$TAG" \
-            dist/nyrvo_*.tar.gz dist/nyrvo_*.zip SHA256SUMS \
-            --title "$TAG" \
-            --notes "What changed in this release is in [CHANGELOG.md](https://github.com/nyrvo-dev/nyrvo/blob/$TAG/CHANGELOG.md)."
+          set -euo pipefail
+          # Re-runnable on purpose. workflow_dispatch exists so a release that
+          # failed partway can be rebuilt against the same tag, and `gh release
+          # create` refuses to run twice, so an existing release is updated in
+          # place instead.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$dist"/nyrvo_*.tar.gz "$dist"/nyrvo_*.zip "$dist/SHA256SUMS" --clobber
+          else
+            gh release create "$TAG" \
+              "$dist"/nyrvo_*.tar.gz "$dist"/nyrvo_*.zip "$dist/SHA256SUMS" \
+              --title "$TAG" \
+              --notes "What changed in this release is in [CHANGELOG.md](https://github.com/nyrvo-dev/nyrvo/blob/$TAG/CHANGELOG.md)."
+          fi

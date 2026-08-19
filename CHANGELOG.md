@@ -13,6 +13,32 @@ not.
 
 Entries for the next release live in `.changes/unreleased/`; see docs/RELEASING.md.
 
+## [0.4.0] — 2026-08-18
+
+### Added
+
+- `composer --version` is captured as the `composer` runtime, so a machine's
+  installed Composer can be compared across snapshots. Composer's version is
+  independent of PHP's, and its resolver changed behaviour across majors: the
+  same composer.json can install different dependency trees under Composer 1
+  and Composer 2. Nothing a project declares pins the installed Composer, so
+  the observation is the only record there is of the drift.
+
+- `requires-python` in pyproject.toml's `[project]` table is read as a
+  requirement source, so a project's declared Python floor is comparable
+  against what a machine actually runs. PEP 621 puts it there, and it is where
+  the standard, most-starred Python projects declare their floor — pyenv's
+  `.python-version`, the file Nyrvo already reads, appears in almost none of
+  them. The constraint is kept verbatim, including its own operators (">=3.11"
+  or ">=3.11,<3.14"); it is recorded as a pin, not a floor, because it already
+  says exactly what it means and an implicit "or newer" would silently discard
+  an upper bound. The table match is exact, so `[project.optional-dependencies]`
+  and `[project.urls]` are never mistaken for `[project]`. A project carrying
+  both `.python-version` and pyproject.toml records both, since two files that
+  disagree is itself worth seeing. No `[project]` table, no `requires-python`
+  key, an empty value, or an unquoted value produces no requirement rather than
+  a guess.
+
 ## [0.3.0] — 2026-08-18
 
 ### Added
@@ -217,7 +243,8 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...v0.1.2

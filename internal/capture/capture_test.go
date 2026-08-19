@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -299,5 +300,78 @@ func TestRunReportsEachSectionStartBeforeItsCollector(t *testing.T) {
 		if res.Sections[i].Collector != name {
 			t.Errorf("sections[%d] = %q, want %q", i, res.Sections[i].Collector, name)
 		}
+	}
+}
+
+// A capture whose collectors hang must stop on its own. Every probe has its own
+// deadline, but nothing bounded their sum, so a machine where each tool hangs
+// spent the total of all of them with a spinner turning and no way to know it
+// would ever end.
+func TestRunStopsWhenTheBudgetExpires(t *testing.T) {
+	slow := stub{name: "system", collect: func(*snapshot.Snapshot) { time.Sleep(200 * time.Millisecond) }}
+	never := 0
+	collectors := []collector.Collector{slow, stub{name: "git", calls: &never}}
+
+	res, err := Run(context.Background(), collectors, Options{
+		Name:   "local",
+		Now:    fixedClock(),
+		Budget: 50 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("Run() succeeded, want a budget failure")
+	}
+	// The message has to name the budget and the collector that was running:
+	// "nyrvo hung" is not a report anyone can act on.
+	for _, want := range []string{"gave up after", "system"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Run() error = %q, want it to mention %q", err, want)
+		}
+	}
+	// No snapshot, deliberately. Collectors that never ran leave their sections
+	// absent, and absence in a snapshot means "looked for and not found" — so
+	// saving a partial capture would publish this machine as lacking every tool
+	// the capture did not reach. That is the bug class this project keeps
+	// fixing, and the budget must not reintroduce it.
+	if res != nil {
+		t.Errorf("Run() = %+v, want no snapshot when the budget expires", res)
+	}
+	if never != 0 {
+		t.Errorf("collector after the budget ran %d times, want 0", never)
+	}
+}
+
+// A caller's own cancellation and the capture's budget both cancel the same
+// context, and they mean different things: one is the user pressing Ctrl-C, the
+// other is a machine that will not answer. Only the cause tells them apart.
+func TestRunDistinguishesCancellationFromTheBudget(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := Run(ctx, []collector.Collector{stub{name: "system"}}, Options{
+		Name:   "local",
+		Now:    fixedClock(),
+		Budget: time.Minute,
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run() error = %v, want context.Canceled", err)
+	}
+	if strings.Contains(err.Error(), "gave up after") {
+		t.Errorf("a user's cancellation was reported as a budget failure: %v", err)
+	}
+}
+
+// Windows allows every probe three times as long, so its capture budget has to
+// be larger or a healthy Windows capture would be cut off by the bound meant to
+// catch a broken one. Both branches are exercised here rather than only on the
+// platform CI happens to be running.
+func TestDefaultBudgetIsLargerOnWindows(t *testing.T) {
+	win, unix := defaultBudget("windows"), defaultBudget("linux")
+	if win <= unix {
+		t.Errorf("defaultBudget(windows) = %s, want more than %s", win, unix)
+	}
+	// The budget only earns its place if it is well clear of a healthy capture
+	// and still well under the sum of every probe deadline it is bounding.
+	if unix < 30*time.Second {
+		t.Errorf("defaultBudget(linux) = %s, too tight for a slow but healthy machine", unix)
 	}
 }

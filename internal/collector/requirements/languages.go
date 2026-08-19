@@ -256,6 +256,53 @@ func quotedAssignment(line, key string) (string, bool) {
 	return strings.TrimSpace(right[1 : end+1]), true
 }
 
+// pythonPyprojectReqs reads the Python version a project requires from
+// pyproject.toml's [project] table, where PEP 621 puts requires-python.
+//
+// It is NOT a floor. Minimum exists for declarations like the go directive in
+// go.mod and Cargo.toml's rust-version, which state a bare version that
+// implicitly means "or newer". requires-python is not that: it carries its own
+// explicit operators — ">=3.11" or ">=3.11,<3.14" — and the diagnostic layer
+// evaluates them directly. Marking it Minimum as well would layer a second,
+// implicit "or newer" on top of a constraint that already says exactly what it
+// means, and would silently discard an upper bound. This is the same shape as
+// composer.json's "^8.3", which is recorded with Minimum false. So Minimum
+// stays false and the operators are enforced verbatim.
+//
+// The table match is exact, the way rustReqs compares to "[package]":
+// [project.optional-dependencies] and [project.urls] are different tables and
+// must never be mistaken for [project]. pyproject.toml is untrusted repository
+// input, so only the one quoted assignment is read and anything unparseable
+// yields nothing rather than a guess, per ADR 0012.
+func pythonPyprojectReqs(dir string) []snapshot.Requirement {
+	body, ok := readSource(dir, "pyproject.toml")
+	if !ok {
+		return nil
+	}
+	inProject := false
+	for _, line := range strings.Split(string(body), "\n") {
+		line = strings.TrimSpace(stripTOMLComment(line))
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			inProject = line == "[project]"
+			continue
+		}
+		if !inProject {
+			continue
+		}
+		if constraint, ok := quotedAssignment(line, "requires-python"); ok && constraint != "" {
+			return []snapshot.Requirement{{
+				Runtime:    "python",
+				Constraint: constraint,
+				Source:     "pyproject.toml requires-python",
+			}}
+		}
+	}
+	return nil
+}
+
 func stripTOMLComment(line string) string {
 	quote := byte(0)
 	for i := range len(line) {

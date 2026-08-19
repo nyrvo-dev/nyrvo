@@ -211,7 +211,8 @@ func runCapture(ctx context.Context, args []string, stdout, stderr io.Writer) er
 	spinner := output.NewSpinner(progress)
 
 	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{
-		Name: name,
+		Name:   name,
+		Budget: capture.DefaultBudget,
 		OnSectionStart: func(sectionName string) {
 			spinner.Start(sectionName)
 		},

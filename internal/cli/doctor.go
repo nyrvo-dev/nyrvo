@@ -349,7 +349,7 @@ func diagnoseRun(ctx context.Context, ref string, jobOperands []string, stderr i
 		}
 	}
 
-	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{Name: defaultDoctorA})
+	res, err := capture.Run(ctx, defaultCollectors(), capture.Options{Name: defaultDoctorA, Budget: capture.DefaultBudget})
 	if err != nil {
 		return nil, nil, err
 	}

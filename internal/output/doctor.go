@@ -160,6 +160,14 @@ type doctorSummary struct {
 // --json form in the CLI.
 func DoctorJSON(w io.Writer, a, b string, findings []finding.Finding, context ...string) error {
 	counts := finding.Count(findings)
+	// A clean diagnosis is an empty list, not an absent one. Findings is built
+	// by appending to a nil slice, which Go encodes as null, and null forces a
+	// consumer to special-case the healthy answer — the same "absent versus
+	// empty" ambiguity the schema exists to settle. diff --json already always
+	// emits [].
+	if findings == nil {
+		findings = []finding.Finding{}
+	}
 	return JSON(w, doctorDoc{
 		A:        a,
 		B:        b,

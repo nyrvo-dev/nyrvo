@@ -24,7 +24,7 @@ func Prompt(in Input) string {
 		b.WriteString("Nyrvo found no semantic differences.\n")
 	} else {
 		for _, d := range in.Differences {
-			fmt.Fprintf(&b, "- kind=%s %s A=%s B=%s\n", d.Kind, located(d.Component, d.Key), display(d.A), display(d.B))
+			fmt.Fprintf(&b, "- kind=%s %s A=%s B=%s\n", d.Kind, located(d.Component, d.Key), side(d.A, d.AUnusable), side(d.B, d.BUnusable))
 		}
 	}
 
@@ -111,6 +111,24 @@ func writeEnvironment(b *strings.Builder, label string, s *snapshot.Snapshot) {
 			fmt.Fprintf(b, "    - %s version=%s path=%s\n", display(rt.Name), display(rt.Version), display(rt.Path))
 		}
 	}
+	// A runtime that refused to answer is neither absent nor measured: it is a
+	// third state (ADR 0017), and omitting it would hand an agent a document
+	// whose evidence says the opposite of the finding printed below it — the
+	// finding says "installed, not usable" while the environment block names no
+	// such runtime. An unmeasured probe is the nondeterministic counterpart; it
+	// is printed so the agent knows a version was asked for and not obtained.
+	if len(s.Unmeasured) > 0 {
+		b.WriteString("  probes that did not answer (left unmeasured):\n")
+		for _, k := range s.Unmeasured {
+			fmt.Fprintf(b, "    - %s\n", display(k))
+		}
+	}
+	if len(s.Unusable) > 0 {
+		b.WriteString("  runtimes installed but refusing to report a version:\n")
+		for _, k := range s.Unusable {
+			fmt.Fprintf(b, "    - %s\n", display(k))
+		}
+	}
 	// A job's backing containers are frequently the whole answer — a suite that
 	// cannot reach a database fails for a reason no version comparison shows —
 	// so omitting them left an agent reasoning about the wrong evidence.
@@ -188,4 +206,17 @@ func display(value string) string {
 		return "(not recorded)"
 	}
 	return value
+}
+
+// side renders one side of a difference for the evidence document. An empty
+// value normally reads as "(not recorded)", but a runtime that was installed
+// and refused to report a version is not unrecorded: the probe ran and got an
+// answer, and an agent told to reason only from this document must not read
+// that as absence. The environment block names the same state above; this keeps
+// the difference line from contradicting it.
+func side(value string, unusable bool) string {
+	if unusable {
+		return "installed, not usable"
+	}
+	return display(value)
 }

@@ -367,3 +367,38 @@ func TestDiffTextUnmeasuredNote(t *testing.T) {
 		t.Errorf("a complete comparison printed the unmeasured note:\n%q", got)
 	}
 }
+
+// A runtime installed but refusing to report a version is neither present nor
+// absent. It must not read as "missing": the tool is on PATH, and the terminal
+// says "installed, not usable" and explains the third state in a note, so a
+// reader does not mistake a refusal for an absence.
+func TestDiffTextUnusableValue(t *testing.T) {
+	res := &diff.Result{
+		A: "laptop", B: "ci", Unusable: true,
+		Differences: []diff.Difference{
+			{Component: diff.ComponentRuntime, Key: "dotnet", Kind: diff.KindOnlyInA, A: "8.0.100", BUnusable: true},
+		},
+	}
+	got := render(t, func(w io.Writer) error { return DiffText(w, res) })
+	for _, want := range []string{
+		"ci      installed, not usable",
+		"installed but refused to report a version",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("DiffText unusable output omits %q:\n%q", want, got)
+		}
+	}
+	if strings.Contains(got, "ci     missing") {
+		t.Errorf("DiffText read an unusable runtime as missing:\n%q", got)
+	}
+}
+
+// The unusable note must also appear when the comparison found no differences
+// but still recorded a refusal, mirroring the unmeasured note.
+func TestDiffTextUnusableNoteWhenNoDifferences(t *testing.T) {
+	empty := &diff.Result{A: "laptop", B: "ci", Unusable: true}
+	got := render(t, func(w io.Writer) error { return DiffText(w, empty) })
+	if !strings.Contains(got, "installed but refused to report a version") {
+		t.Errorf("no-differences output omits the unusable note:\n%q", got)
+	}
+}

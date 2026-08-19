@@ -302,3 +302,19 @@ func TestDoctorJSONContext(t *testing.T) {
 		t.Errorf("empty context should be omitted: %s", buf.String())
 	}
 }
+
+// A clean diagnosis must serialize as an empty list, not null: a consumer that
+// reads doc.findings.length crashes on null, and "absent" versus "empty" is the
+// exact ambiguity a frozen machine contract has to settle.
+func TestDoctorJSONEmptyFindingsIsAnEmptyArray(t *testing.T) {
+	var b bytes.Buffer
+	if err := DoctorJSON(&b, "local", "ci", nil); err != nil {
+		t.Fatalf("DoctorJSON() error = %v", err)
+	}
+	if !strings.Contains(b.String(), `"findings": []`) {
+		t.Errorf("clean diagnosis does not emit an empty array:\n%s", b.String())
+	}
+	if strings.Contains(b.String(), "null") {
+		t.Errorf("clean diagnosis emits null:\n%s", b.String())
+	}
+}

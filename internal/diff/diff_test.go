@@ -2,6 +2,7 @@ package diff
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -153,17 +154,17 @@ func TestMissingSectionsDoNotPanic(t *testing.T) {
 	}
 }
 
-// An optional field observed on one side only (no uname, or a detached HEAD in
-// CI) is reported as only_in_a — never as a change to the empty string, and
-// never silently dropped.
+// An optional field observed on one side only (a detached HEAD in CI) is
+// reported as only_in_a — never as a change to the empty string, and never
+// silently dropped. The kernel is the exception, not here but in
+// TestKernelComparedOnlyWhenBothSidesObserveIt: a kernel is present on every
+// machine, so one side being unable to name one is not evidence of absence.
 func TestOptionalFieldsAbsentOnOneSide(t *testing.T) {
 	a, b := base("local"), base("changed")
-	b.System.Kernel = ""
 	b.Git.Branch = ""
 
 	got := Compare(a, b)
 	want := []Difference{
-		{Component: ComponentSystem, Key: "kernel", Kind: KindOnlyInA, A: "25.5.0"},
 		{Component: ComponentGit, Key: "branch", Kind: KindOnlyInA, A: "main"},
 	}
 	if len(got.Differences) != len(want) {
@@ -176,10 +177,46 @@ func TestOptionalFieldsAbsentOnOneSide(t *testing.T) {
 	}
 
 	// Neither side observed it: nothing to report.
-	a.System.Kernel = ""
 	a.Git.Branch = ""
 	if got := Compare(a, b); !got.Empty() {
 		t.Fatalf("fields absent on both sides produced differences: %+v", got.Differences)
+	}
+}
+
+// A kernel is present on every operating system. A workflow-derived snapshot
+// can never state one, so a one-sided kernel must not read as the other machine
+// having no kernel: that would print "kernel: ci missing" on every local-vs-CI
+// diff, drift Nyrvo invented. The kernel is only compared when both sides
+// observed one.
+func TestKernelComparedOnlyWhenBothSidesObserveIt(t *testing.T) {
+	a, b := base("local"), base("ci")
+	b.System.OS = "linux"
+	b.System.Arch = "x86_64"
+	// A workflow names the distribution but not the kernel version.
+	b.System.Kernel = ""
+
+	got := Compare(a, b)
+	for _, d := range got.Differences {
+		if d.Component == ComponentSystem && d.Key == "kernel" {
+			t.Fatalf("a one-sided kernel was reported as drift: %+v", d)
+		}
+	}
+
+	// When both sides observe a kernel, a difference between them is real drift
+	// and must still be reported.
+	b.System.Kernel = "6.8.1"
+	var kernelDiff *Difference
+	diffs := Compare(a, b).Differences
+	for i := range diffs {
+		if diffs[i].Component == ComponentSystem && diffs[i].Key == "kernel" {
+			kernelDiff = &diffs[i]
+		}
+	}
+	if kernelDiff == nil {
+		t.Fatal("a two-sided kernel difference was dropped")
+	}
+	if kernelDiff.Kind != KindChanged || kernelDiff.A != "25.5.0" || kernelDiff.B != "6.8.1" {
+		t.Fatalf("kernel difference = %+v, want a changed 25.5.0 -> 6.8.1", kernelDiff)
 	}
 }
 
@@ -428,5 +465,106 @@ func TestUnmeasuredSuppressesOnlyTheKeyItNames(t *testing.T) {
 	}
 	if d := res.Differences[0]; d.Key != "node" || d.Kind != KindChanged {
 		t.Errorf("difference = %+v, want the node version change", d)
+	}
+}
+
+// ADR 0017's third state: a runtime installed but refusing to report a version.
+// Unlike an unmeasured probe, a refusal is deterministic and is usually the
+// drift being sought, so the difference must survive — but it must be marked so
+// a consumer can tell "not installed" from "installed, refused", which look
+// identical in the empty A/B value.
+func TestUnusableRuntimeIsReportedNotDropped(t *testing.T) {
+	a := snapshot.New("laptop", time.Time{})
+	a.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.0"}, {Name: "dotnet", Version: "8.0.100"}}
+
+	b := snapshot.New("ci", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.0"}}
+	b.Unusable = []string{"runtime.dotnet"}
+
+	res := Compare(a, b)
+	if !res.Unusable {
+		t.Error("Result.Unusable = false, want true so the refusal is announced")
+	}
+
+	var dotnet *Difference
+	for i := range res.Differences {
+		if res.Differences[i].Component == ComponentRuntime && res.Differences[i].Key == "dotnet" {
+			dotnet = &res.Differences[i]
+		}
+	}
+	if dotnet == nil {
+		t.Fatalf("an unusable runtime was dropped: %+v", res.Differences)
+	}
+	if dotnet.Kind != KindOnlyInA || dotnet.A != "8.0.100" {
+		t.Errorf("dotnet difference = %+v, want only_in_a with A=8.0.100", dotnet)
+	}
+	// The signal lives in the flag, not the value: b has no version to print,
+	// and without the flag that would read as b not having dotnet at all.
+	if !dotnet.BUnusable {
+		t.Errorf("BUnusable = false, want true so ci's refusal is distinguishable from absence")
+	}
+	if dotnet.AUnusable {
+		t.Error("AUnusable = true, want false: laptop observed a working dotnet")
+	}
+}
+
+// The unusable state must be announced even when the refused runtime lines up
+// with nothing and hides no difference, exactly as an unmeasured probe is.
+func TestUnusableAnnouncedEvenWhenItHidesNoDifference(t *testing.T) {
+	a := snapshot.New("laptop", time.Time{})
+	b := snapshot.New("ci", time.Time{})
+	b.Unusable = []string{"runtime.dotnet"}
+
+	if res := Compare(a, b); !res.Unusable {
+		t.Error("Result.Unusable = false, want true")
+	}
+}
+
+// The refusal must be exact: b refusing to report dotnet says nothing about
+// node, and a genuine runtime difference must survive with only its own flag.
+func TestUnusableMarksOnlyTheKeyItNames(t *testing.T) {
+	a := snapshot.New("laptop", time.Time{})
+	a.Runtimes = []snapshot.Runtime{
+		{Name: "dotnet", Version: "8.0.100"},
+		{Name: "node", Version: "20.1.0"},
+	}
+	b := snapshot.New("ci", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "node", Version: "22.4.0"}}
+	b.Unusable = []string{"runtime.dotnet"}
+
+	res := Compare(a, b)
+	if len(res.Differences) != 2 {
+		t.Fatalf("differences = %+v, want the dotnet refusal and the node change", res.Differences)
+	}
+	for _, d := range res.Differences {
+		if d.Key == "node" && d.BUnusable {
+			t.Errorf("node difference was marked unusable: %+v", d)
+		}
+	}
+}
+
+// The unusable flag must survive JSON round-tripping so a machine consumer can
+// act on it: "installed, refused" is a real state, not an absence.
+func TestUnusableDifferenceSurvivesJSON(t *testing.T) {
+	a := snapshot.New("laptop", time.Time{})
+	a.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.0"}, {Name: "dotnet", Version: "8.0.100"}}
+	b := snapshot.New("ci", time.Time{})
+	b.Runtimes = []snapshot.Runtime{{Name: "go", Version: "1.26.0"}}
+	b.Unusable = []string{"runtime.dotnet"}
+
+	res := Compare(a, b)
+	data, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"b_unusable":true`) {
+		t.Errorf("diff JSON omits the unusable flag: %s", data)
+	}
+	var back Result
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Differences) != 1 || !back.Differences[0].BUnusable {
+		t.Errorf("round-tripped differences = %+v, want one difference with BUnusable", back.Differences)
 	}
 }

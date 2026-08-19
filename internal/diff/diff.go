@@ -59,6 +59,12 @@ type Difference struct {
 	// placeholder "present" — Nyrvo never stores their values.
 	A string `json:"a,omitempty"`
 	B string `json:"b,omitempty"`
+	// AUnusable and BUnusable report that the corresponding side recorded this
+	// observation as installed but refusing to report a version. Both the value
+	// and the empty string would otherwise read as absence; the flag is how a
+	// JSON consumer tells "not installed" from "installed, refused".
+	AUnusable bool `json:"a_unusable,omitempty"`
+	BUnusable bool `json:"b_unusable,omitempty"`
 }
 
 // Result is the full comparison of two snapshots.
@@ -81,6 +87,12 @@ type Result struct {
 	// describe a source that never claimed to be exhaustive, this one describes
 	// a probe that was supposed to answer and did not.
 	Unmeasured bool `json:"unmeasured,omitempty"`
+	// Unusable reports that a side recorded a runtime as installed but refusing
+	// to report a version. Unlike Unmeasured these differences are kept and
+	// reported: a refusal is deterministic — asking again will not produce a
+	// version — and it is usually the exact drift being sought. The field
+	// announces that the comparison includes refusals, not just absences.
+	Unusable bool `json:"unusable,omitempty"`
 }
 
 // Empty reports whether the two environments are semantically identical.
@@ -108,7 +120,14 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 		res.B = b.Name
 	}
 
-	compareSection(res, ComponentSystem, systemValues(a), systemValues(b), report{a: true, b: true})
+	asys, bsys := systemValues(a), systemValues(b)
+	// A kernel is present on every operating system, so a workflow-derived
+	// snapshot — which can never state one — must not read as the machine
+	// having no kernel. Emitting it one-sided would print "kernel: ci missing"
+	// on every local-vs-CI diff, drift Nyrvo invented. Compare it only when both
+	// sides observed one; one-sided presence carries no signal.
+	asys, bsys = symmetricPair(asys, bsys, "kernel")
+	compareSection(res, ComponentSystem, asys, bsys, report{a: true, b: true})
 	compareSection(res, ComponentGit, gitValues(a), gitValues(b), report{a: true, b: true})
 	// A runtime list derived from a workflow states what a job sets up, not what
 	// the runner image provides, so it cannot testify to absence any more than a
@@ -138,6 +157,7 @@ func Compare(a, b *snapshot.Snapshot) *Result {
 		res.PartialRuntimes = true
 	}
 	dropUnmeasured(res, a, b)
+	annotateUnusable(res, a, b)
 
 	sort.SliceStable(res.Differences, func(i, j int) bool {
 		di, dj := res.Differences[i], res.Differences[j]
@@ -231,6 +251,69 @@ func silentAbout(keys map[string]bool, component string) bool {
 	return false
 }
 
+// annotateUnusable marks which side of each difference is a runtime that was
+// installed but refused to report a version, and announces that the comparison
+// includes such refusals.
+//
+// Unlike dropUnmeasured, this does not remove the difference. A refusal is
+// deterministic — asking again will not produce a version — and it is usually
+// the exact drift the user is running Nyrvo to find, so it must stay in the
+// report. The flags let a consumer tell "absent" from "installed, refused",
+// which look identical in the A/B value: both carry an empty string. This is
+// the third of the three outcomes ADR 0017 distinguishes, and every consumer
+// has to handle it rather than a boolean.
+func annotateUnusable(res *Result, a, b *snapshot.Snapshot) {
+	ua, ub := unusableKeys(a), unusableKeys(b)
+	if len(ua) == 0 && len(ub) == 0 {
+		return
+	}
+	// Set from the snapshots rather than from what was annotated, for the same
+	// reason Unmeasured is set from them: a reader has to be told the comparison
+	// contains a refusal even when it happened to line up and hid no difference.
+	res.Unusable = true
+
+	for i := range res.Differences {
+		d := &res.Differences[i]
+		// A whole-section difference carries no key, so there is no single
+		// observation to mark; the announcement above still covers it.
+		if d.Key == "" {
+			continue
+		}
+		key := d.Component + "." + d.Key
+		if ua[key] {
+			d.AUnusable = true
+		}
+		if ub[key] {
+			d.BUnusable = true
+		}
+	}
+}
+
+func unusableKeys(s *snapshot.Snapshot) map[string]bool {
+	if s == nil || len(s.Unusable) == 0 {
+		return nil
+	}
+	keys := make(map[string]bool, len(s.Unusable))
+	for _, k := range s.Unusable {
+		keys[k] = true
+	}
+	return keys
+}
+
+// symmetricPair drops a key from both sides unless both observed it. It is for
+// facts every machine has but that a source of one kind cannot state — a
+// workflow-derived snapshot names no kernel version — where one-sided presence
+// would otherwise read as the other side being without that fact.
+func symmetricPair(a, b map[string]string, key string) (map[string]string, map[string]string) {
+	_, inA := a[key]
+	_, inB := b[key]
+	if inA != inB {
+		delete(a, key)
+		delete(b, key)
+	}
+	return a, b
+}
+
 // partialRuntimes reports a runtime list that cannot testify to absence. It
 // takes the pointer so a nil side answers false without every caller guarding it.
 func partialRuntimes(s *snapshot.Snapshot) bool {
@@ -317,9 +400,11 @@ func systemValues(s *snapshot.Snapshot) map[string]string {
 	if s.System.Arch != "" {
 		v["arch"] = s.System.Arch
 	}
-	// An unobserved kernel contributes no key, so it is reported as only_in_*
-	// rather than as a change from a real value to the empty string. "We could
-	// not see this here" is itself evidence and is not silently dropped.
+	// An unobserved kernel contributes no key. Unlike os and arch — where a
+	// one-sided observation is itself evidence — the kernel is present on every
+	// machine, so a source that cannot state one (a workflow file) must not
+	// read as the machine having none. Compare() drops a one-sided kernel via
+	// symmetricPair before this section is compared.
 	if s.System.Kernel != "" {
 		v["kernel"] = s.System.Kernel
 	}

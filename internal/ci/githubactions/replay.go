@@ -50,7 +50,10 @@ func Replay(job *Job) ReplayPlan {
 		return ReplayPlan{}
 	}
 	plan := ReplayPlan{
-		Job:   job.ID,
+		Job: job.ID,
+		// Steps is initialized so a job without steps serializes as [] rather
+		// than null: the frozen machine contract reads "no steps", not "unknown".
+		Steps: make([]ReplayStep, 0, len(job.Steps)),
 		Notes: append([]string(nil), job.Notes...),
 	}
 	if plan.Job == "" {

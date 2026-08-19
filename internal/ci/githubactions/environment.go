@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // Snapshot converts a parsed workflow job into a snapshot describing the
@@ -44,10 +45,14 @@ func Snapshot(w *Workflow, j *Job, name string, now time.Time) (*snapshot.Snapsh
 	// evidence, so the section is left absent: "not observed" is the honest
 	// signal here.
 
+	// Notes carry step names, job names, runs-on labels and container images
+	// straight from the workflow file, which is input a repository can publish;
+	// nothing may arrive in a snapshot carrying a control byte that a terminal
+	// would interpret (docs/adr/0011).
 	snap.Source = &snapshot.Source{
 		Kind:  snapshot.SourceGitHubActions,
 		Ref:   w.Path + "#" + j.ID,
-		Notes: notes,
+		Notes: textsafe.StripAll(notes),
 	}
 
 	snap.Normalize()

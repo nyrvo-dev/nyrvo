@@ -1,6 +1,7 @@
 package githubactions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -196,6 +197,43 @@ func TestJobLogLineTruncation(t *testing.T) {
 	}
 }
 
+// A runaway error line must be cut too. TestJobLogLineTruncation only walks the
+// excerpt path, so without this test removing the truncation from the
+// ##[error] path would leave the suite green.
+func TestJobLogErrorLineTruncation(t *testing.T) {
+	raw := []byte("2026-08-16T00:00:00.0000000Z ##[error]" + strings.Repeat("x", 5000) + "\n")
+	jl := ParseJobLog(raw)
+	if len(jl.Errors) != 1 {
+		t.Fatalf("Errors = %d lines, want 1", len(jl.Errors))
+	}
+	if got := utf8.RuneCountInString(jl.Errors[0]); got != 501 {
+		t.Errorf("error line = %d runes, want 501", got)
+	}
+	if !strings.HasSuffix(jl.Errors[0], "…") {
+		t.Errorf("error line does not end with the ellipsis: %q", jl.Errors[0][:20])
+	}
+}
+
+// The failure excerpt must be bounded end to end: excerptLimit before the
+// error and errorLimit error lines, whatever the log contains. A step that
+// prints one error per output line must not turn a log into a snapshot.
+func TestJobLogErrorBounded(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < errorLimit+1000; i++ {
+		fmt.Fprintf(&b, "##[error]err %d\n", i)
+	}
+	jl := ParseJobLog([]byte(b.String()))
+	if len(jl.Errors) != errorLimit {
+		t.Errorf("Errors = %d, want %d", len(jl.Errors), errorLimit)
+	}
+	if len(jl.FailureLines) != errorLimit {
+		t.Errorf("FailureLines = %d, want %d", len(jl.FailureLines), errorLimit)
+	}
+	if jl.DroppedErrors != 1000 {
+		t.Errorf("DroppedErrors = %d, want 1000", jl.DroppedErrors)
+	}
+}
+
 // The go fallback line yields the version when no setup line exists.
 func TestJobLogGoFallback(t *testing.T) {
 	raw := []byte("2026-08-16T00:00:00.0000000Z go version go1.26.6 linux/amd64\n")
@@ -252,4 +290,16 @@ func joinedJobLog(jl *JobLog) string {
 	parts = append(parts, jl.Errors...)
 	parts = append(parts, jl.FailureLines...)
 	return strings.Join(parts, "\n")
+}
+
+// hasControlByte reports whether s carries any C0 control character other than
+// tab. Nothing that enters a snapshot may: a control byte is a terminal
+// directive, not content.
+func hasControlByte(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < 0x20 && s[i] != '\t' {
+			return true
+		}
+	}
+	return false
 }

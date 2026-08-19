@@ -2,12 +2,14 @@ package githubactions
 
 import (
 	"bytes"
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/nyrvo-dev/nyrvo/internal/snapshot"
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // JobLog is what Nyrvo could safely learn from one job's log.
@@ -21,8 +23,13 @@ type JobLog struct {
 	RunnerVersion string
 	Image         Image
 	Runtimes      []snapshot.Runtime
-	// Errors are the ##[error] messages in order, with the marker stripped.
+	// Errors are the ##[error] messages in order, with the marker stripped,
+	// capped at errorLimit. DroppedErrors reports how many were left out so a
+	// truncated prefix is never mistaken for the whole story.
 	Errors []string
+	// DroppedErrors is how many ##[error] lines were not kept because
+	// errorLimit was reached.
+	DroppedErrors int
 	// FailureLines is a bounded excerpt of the output around the failure: the
 	// qualifying lines just before the first error, plus the error lines.
 	FailureLines []string
@@ -55,6 +62,15 @@ const excerptLimit = 20
 // lineLimit caps a single line; longer lines are cut and marked with an
 // ellipsis. The bound exists for the same reason as excerptLimit.
 const lineLimit = 500
+
+// errorLimit caps how many ##[error] lines a job log may contribute to the
+// failure excerpt. excerptLimit bounds the lines before the failure, but error
+// lines were appended without bound: a step that prints one error per output
+// line turns a 10MB log into a snapshot-sized list of "Log:" notes, which is
+// how a 10MB log became an 8MB snapshot. The first errors are the ones that
+// identify the failure, so a prefix is kept and the dropped count is reported
+// rather than hidden.
+const errorLimit = 50
 
 // parsedLogLine is one sanitized log line together with the state that decides
 // whether it may be quoted.
@@ -93,7 +109,11 @@ func ParseJobLog(raw []byte) *JobLog {
 		case strings.HasPrefix(text, "##[error]"):
 			p.isError = true
 			p.text = strings.TrimPrefix(text, "##[error]")
-			jl.Errors = append(jl.Errors, truncateLine(p.text))
+			if len(jl.Errors) < errorLimit {
+				jl.Errors = append(jl.Errors, truncateLine(p.text))
+			} else {
+				jl.DroppedErrors++
+			}
 		default:
 			observeRunnerVersion(jl, text)
 			observeImage(jl, group, text)
@@ -125,38 +145,8 @@ func ParseJobLog(raw []byte) *JobLog {
 // verbatim.
 func sanitizeLogLine(line string) string {
 	line = timestampPrefix.ReplaceAllString(line, "")
-	line = stripANSI(line)
+	line = textsafe.Strip(line)
 	return strings.TrimSuffix(line, "\r")
-}
-
-// stripANSI removes ANSI escape sequences and every other C0 control character
-// except tab. A log is terminal output: an escape sequence could move a cursor,
-// repaint a line, or hide text in a report a human is reading to make a
-// decision, so nothing but printable text may survive into a snapshot.
-func stripANSI(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == 0x1b {
-			// CSI: ESC [ parameters... final-byte.
-			if i+1 < len(s) && s[i+1] == '[' {
-				i += 2
-				for i < len(s) && !isCSIFinalByte(s[i]) {
-					i++
-				}
-				continue
-			}
-			// Any other escape: skip the introducer and its one following byte.
-			i++
-			continue
-		}
-		if c < 0x20 && c != '\t' {
-			continue
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
 }
 
 // failureExcerpt picks the output lines just before the first error, walking
@@ -367,13 +357,21 @@ func ApplyJobLog(snap *snapshot.Snapshot, jl *JobLog) {
 	if jl.RunnerVersion != "" {
 		notes = append(notes, "The runner was version "+jl.RunnerVersion+".")
 	}
-	// The failure excerpt is the point of reading the log at all. It is already
-	// bounded and stripped of group contents, so the env: block the runner
-	// echoes before each step cannot appear here (docs/adr/0011).
+	// The failure excerpt is the point of reading the log at all. ParseJobLog
+	// bounded it to excerptLimit lines before the failure plus errorLimit error
+	// lines, and kept it stripped of group contents, so the env: block the
+	// runner echoes before each step cannot appear here (docs/adr/0011). A
+	// bound that silently kept a prefix would overstate the evidence, so a
+	// truncation that dropped error lines is reported.
 	for _, line := range jl.FailureLines {
 		notes = append(notes, "Log: "+line)
 	}
-	snap.Source.Notes = notes
+	if jl.DroppedErrors > 0 {
+		notes = append(notes, fmt.Sprintf("The log showed %d more ##[error] lines; only the first %d were kept.", jl.DroppedErrors, errorLimit))
+	}
+	// The log lines were sanitized when parsed, so this is defense in depth:
+	// the invariant is that no Source.Notes entry ever carries a control byte.
+	snap.Source.Notes = textsafe.StripAll(notes)
 
 	snap.Normalize()
 }
@@ -407,8 +405,3 @@ func observeRunnerImageGroup(jl *JobLog, line string) {
 		jl.Image.Version = v
 	}
 }
-
-// isCSIFinalByte reports whether c terminates a CSI escape sequence. Everything
-// between the introducer and this byte is parameters, which are discarded with
-// the sequence itself.
-func isCSIFinalByte(c byte) bool { return c >= 0x40 && c <= 0x7e }

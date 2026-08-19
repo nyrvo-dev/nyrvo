@@ -1,6 +1,7 @@
 package githubactions
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,5 +98,32 @@ func TestApplyJobLogNilInputs(t *testing.T) {
 	ApplyJobLog(snap, nil)
 	if snap.Source != nil {
 		t.Errorf("a nil log must change nothing, got %+v", snap.Source)
+	}
+}
+
+// A log with more error lines than errorLimit must produce a bounded number of
+// "Log:" notes, and the truncation must be visible: a prefix that silently
+// dropped the rest would overstate what the log said.
+func TestApplyJobLogReportsDroppedErrors(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < errorLimit+1000; i++ {
+		fmt.Fprintf(&b, "##[error]err %d\n", i)
+	}
+	snap := snapshot.New("ci", time.Now())
+	snap.Source = &snapshot.Source{Kind: snapshot.SourceGitHubActionsRun}
+	ApplyJobLog(snap, ParseJobLog([]byte(b.String())))
+
+	logNotes := 0
+	for _, n := range snap.Source.Notes {
+		if strings.HasPrefix(n, "Log: ") {
+			logNotes++
+		}
+	}
+	if logNotes > errorLimit {
+		t.Errorf("%d Log notes, want at most %d", logNotes, errorLimit)
+	}
+	joined := strings.Join(snap.Source.Notes, "\n")
+	if !strings.Contains(joined, "1000 more ##[error] lines") {
+		t.Errorf("notes should say how many error lines were dropped:\n%s", joined)
 	}
 }

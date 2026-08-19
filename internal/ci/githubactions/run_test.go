@@ -312,6 +312,40 @@ func TestRunSnapshotLeaksNothing(t *testing.T) {
 	}
 }
 
+// Job names, step names, runner labels and conclusions come from the API as
+// strings a repository can control. A control byte in any of them must not
+// survive into a note: a terminal would interpret it, not print it (docs/adr/0011).
+func TestRunSnapshotNotesStripControlBytes(t *testing.T) {
+	r := &Run{
+		Repository:   "owner/repo",
+		ID:           1,
+		Conclusion:   "failure\x1b[2J\x1b[31mEVIL\x1b[0m",
+		WorkflowPath: "ci.yml",
+	}
+	j := &RunJob{
+		Name:       "build\x1b[2J\x1b[31mEVIL\x1b[0m",
+		Conclusion: "failure",
+		Labels:     []string{"runner\x1b[2J\x1b[31mEVIL\x1b[0m"},
+		Steps: []RunStep{
+			{Name: "step\x1b[2J\x1b[31mEVIL\x1b[0m", Number: 1, Conclusion: "failure"},
+		},
+	}
+	snap, err := RunSnapshot(r, j, "ci", time.Now())
+	if err != nil {
+		t.Fatalf("RunSnapshot: %v", err)
+	}
+	for _, n := range snap.Source.Notes {
+		if hasControlByte(n) {
+			t.Errorf("note carries control bytes: %q", n)
+		}
+	}
+	// The readable text survives; only the escapes are gone.
+	joined := strings.Join(snap.Source.Notes, "\n")
+	if !strings.Contains(joined, "EVIL") {
+		t.Errorf("notes lost the visible text: %q", joined)
+	}
+}
+
 // Without a job URL the Source ref falls back to a stable human-readable
 // description, and without a head SHA the git section is left absent.
 func TestRunSnapshotRefAndGitFallbacks(t *testing.T) {

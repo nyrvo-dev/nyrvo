@@ -13,6 +13,25 @@ not.
 
 Entries for the next release live in `.changes/unreleased/`; see docs/RELEASING.md.
 
+## [0.3.0] — 2026-08-18
+
+### Added
+
+- `packageManager` in package.json is read as a requirement source, so a
+  project that pins the package manager corepack must run can be compared
+  against what a machine actually has. The value is `npm`, `pnpm` or `yarn` at
+  an exact version, and the `+sha512.…` integrity suffix corepack records is
+  stripped before it is stored. It is recorded as a pin, not a floor: corepack
+  downloads and runs precisely that version and refuses anything else, so a
+  machine with any other version genuinely cannot build the project. A package
+  manager name Nyrvo does not understand, or a malformed value, produces no
+  requirement rather than a guess.
+
+- `pnpm --version` and `yarn --version` are captured as the `pnpm` and `yarn`
+  runtimes, and `pnpm/action-setup` is recognized in a workflow, so a CI job's
+  pinned package manager is comparable against the machine — without the
+  observations a packageManager requirement could be stored but never checked.
+
 ## [0.2.0] — 2026-08-17
 
 ### Added
@@ -198,7 +217,8 @@ so Windows is not claimed as supported.
 - Configuration is user-level only. A repository-level config file would let the
   author of a pull request choose which program Nyrvo executes.
 
-[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/nyrvo-dev/nyrvo/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/nyrvo-dev/nyrvo/compare/v0.1.0...v0.1.1

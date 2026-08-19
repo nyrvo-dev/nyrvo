@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"bytes"
+	"encoding/json"
 	"reflect"
 	"slices"
 	"strings"
@@ -269,5 +270,232 @@ func TestUnusableIsOmittedWhenEverythingWasUsable(t *testing.T) {
 	}
 	if strings.Contains(string(data), "unusable") {
 		t.Errorf("a snapshot with nothing unusable carries an unusable key:\n%s", data)
+	}
+}
+
+func TestValidateAcceptsValidSnapshot(t *testing.T) {
+	if err := newTestSnapshot("local").Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestValidateRejectsNil(t *testing.T) {
+	var s *Snapshot
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of nil returned no error")
+	}
+}
+
+// A document with no version stamp is indistinguishable from a JSON file that
+// merely parses; whatever it says, Nyrvo cannot trust it as a snapshot.
+func TestValidateRejectsZeroSchemaVersion(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.SchemaVersion = 0
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of schema_version 0 returned no error")
+	}
+}
+
+func TestValidateRejectsNegativeSchemaVersion(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.SchemaVersion = -1
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of negative schema_version returned no error")
+	}
+}
+
+func TestValidateRejectsEmptyName(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Name = ""
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of an empty name returned no error")
+	}
+}
+
+// A runtime without a name cannot be keyed for diffing or named in a finding,
+// so it is not an observation Nyrvo can reason about.
+func TestValidateRejectsRuntimeWithoutName(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Runtimes = append(s.Runtimes, Runtime{Name: "", Version: "1.0"})
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of a nameless runtime returned no error")
+	}
+}
+
+// Two entries sharing one runtime name are one observation recorded twice, and
+// a diff reading them would invent a second runtime that does not exist.
+func TestValidateRejectsDuplicateRuntimes(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Runtimes = append(s.Runtimes, Runtime{Name: "node", Version: "22.0.0"})
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of duplicated runtimes returned no error")
+	}
+}
+
+// A requirement that does not say which runtime it constrains is a claim
+// without a subject, and cannot be matched against anything observed.
+func TestValidateRejectsRequirementWithoutRuntime(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Requirements = []Requirement{{Runtime: "", Constraint: "1.25", Source: "go.mod go directive"}}
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of a runtime-less requirement returned no error")
+	}
+}
+
+func TestValidateRejectsDuplicateRequirements(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Requirements = []Requirement{
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive"},
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive"},
+	}
+	if err := s.Validate(); err == nil {
+		t.Fatal("Validate() of duplicated requirements returned no error")
+	}
+}
+
+// The same runtime from different sources is deliberate — .nvmrc and
+// package.json disagreeing is itself a fact worth seeing — and must not be
+// mistaken for a duplicate.
+func TestValidateAllowsSameRuntimeFromDifferentSources(t *testing.T) {
+	s := newTestSnapshot("local")
+	s.Requirements = []Requirement{
+		{Runtime: "node", Constraint: ">=24", Source: "package.json engines.node"},
+		{Runtime: "node", Constraint: "^20", Source: ".nvmrc"},
+	}
+	if err := s.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+// Normalize sorts Requirements the way it sorts every other collection; without
+// that sort two captures of one machine could serialize differently depending
+// on which file the requirements collector read first. This test pins the
+// Requirements sort specifically: it was the one collection whose unsorted
+// state left the whole suite green.
+func TestNormalizeSortsRequirements(t *testing.T) {
+	s := New("local", time.Time{})
+	s.Requirements = []Requirement{
+		{Runtime: "node", Constraint: ">=24", Source: "package.json engines.node"},
+		{Runtime: "python", Constraint: "3.13", Source: ".python-version"},
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive", Minimum: true},
+		{Runtime: "node", Constraint: "^20", Source: ".nvmrc"},
+	}
+	want := []Requirement{
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive", Minimum: true},
+		{Runtime: "node", Constraint: "^20", Source: ".nvmrc"},
+		{Runtime: "node", Constraint: ">=24", Source: "package.json engines.node"},
+		{Runtime: "python", Constraint: "3.13", Source: ".python-version"},
+	}
+	s.Normalize()
+	if !reflect.DeepEqual(s.Requirements, want) {
+		t.Fatalf("Normalize() Requirements = %+v, want %+v", s.Requirements, want)
+	}
+}
+
+// The Marshal-level guarantee for requirements: the same set appended in a
+// different order must still serialize byte-for-byte identically.
+func TestMarshalIndependentOfRequirementAppendOrder(t *testing.T) {
+	a := newTestSnapshot("same")
+	b := newTestSnapshot("same")
+	a.Requirements = []Requirement{
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive", Minimum: true},
+		{Runtime: "node", Constraint: ">=24", Source: "package.json engines.node"},
+		{Runtime: "node", Constraint: "^20", Source: ".nvmrc"},
+	}
+	b.Requirements = []Requirement{
+		{Runtime: "node", Constraint: "^20", Source: ".nvmrc"},
+		{Runtime: "go", Constraint: "1.25", Source: "go.mod go directive", Minimum: true},
+		{Runtime: "node", Constraint: ">=24", Source: "package.json engines.node"},
+	}
+	ab, err := Marshal(a)
+	if err != nil {
+		t.Fatalf("Marshal(a) error = %v", err)
+	}
+	bb, err := Marshal(b)
+	if err != nil {
+		t.Fatalf("Marshal(b) error = %v", err)
+	}
+	if !bytes.Equal(ab, bb) {
+		t.Fatalf("Marshal() requirement order-dependent:\na: %s\nb: %s", ab, bb)
+	}
+}
+
+// A snapshot is not only written by Nyrvo, it is also read by it: one produced
+// by an older build, edited by hand, or sent by someone else to be diffed. The
+// collectors sanitize what they store, so this covers the way out — an escape
+// sequence in a note can clear the screen a person is reading a diagnosis on.
+func TestNormalizeStripsControlBytesFromLoadedText(t *testing.T) {
+	esc := "\x1b"
+	s := &Snapshot{
+		SchemaVersion: SchemaVersion,
+		Name:          "ci",
+		Source:        &Source{Kind: SourceLocal, Notes: []string{"step " + esc + "[2J" + esc + "[31mHIDDEN" + esc + "[0m"}},
+		Services:      []Service{{Image: "postgres:16" + esc + "[2J", ID: "db" + esc + "[1m"}},
+		Runtimes:      []Runtime{{Name: "go", Version: "1.26.0" + esc + "[2J", Path: "/usr/bin/go" + esc + "[0m"}},
+		Requirements:  []Requirement{{Runtime: "node", Constraint: ">=24" + esc + "[2J", Source: "package.json" + esc + "[0m"}},
+	}
+	s.Normalize()
+
+	for _, got := range []string{
+		s.Source.Notes[0],
+		s.Services[0].Image, s.Services[0].ID,
+		s.Runtimes[0].Version, s.Runtimes[0].Path,
+		s.Requirements[0].Constraint, s.Requirements[0].Source,
+	} {
+		for _, r := range got {
+			if r < 0x20 && r != '\t' {
+				t.Errorf("control byte %#U survived Normalize in %q", r, got)
+			}
+		}
+	}
+	if s.Source.Notes[0] != "step HIDDEN" {
+		t.Errorf("note = %q, want %q", s.Source.Notes[0], "step HIDDEN")
+	}
+}
+
+// Every string in a snapshot is stripped, not a hand-picked subset. The first
+// version of this covered notes, services, requirements and runtimes and missed
+// Source.Ref -- which reaches the terminal inside a doctor recommendation and is
+// forwarded to an agent -- and Environment.Names, which becomes a difference key
+// the diff prints. Enumerating the risky fields is how that gap appeared, so
+// this walks the whole document.
+func TestNormalizeStripsControlBytesFromEveryField(t *testing.T) {
+	esc := "\x1b[2J"
+	s := &Snapshot{
+		SchemaVersion: SchemaVersion,
+		Name:          "ci" + esc,
+		Source:        &Source{Kind: "github-actions" + esc, Ref: "ci.yml#job" + esc, Notes: []string{"note" + esc}},
+		System:        &System{OS: "linux" + esc, Arch: "amd64" + esc, Kernel: "6.8" + esc},
+		Docker:        &Docker{ClientVersion: "28" + esc, ServerVersion: "28" + esc, ComposeVersion: "2.40" + esc},
+		Git:           &Git{SHA: "abc123" + esc, Branch: "main" + esc},
+		Environment:   &Environment{Names: []string{"PATH" + esc}},
+		Services:      []Service{{Image: "postgres:16" + esc, ID: "db" + esc, Ports: []string{"5432" + esc}}},
+		Requirements:  []Requirement{{Runtime: "node" + esc, Constraint: ">=24" + esc, Source: "package.json" + esc}},
+		Runtimes:      []Runtime{{Name: "go" + esc, Version: "1.26" + esc, Path: "/usr/bin/go" + esc}},
+		Unmeasured:    []string{"runtime.npm" + esc},
+		Unusable:      []string{"runtime.dotnet" + esc},
+	}
+	s.Normalize()
+
+	// Re-encoding is how the whole document is checked without naming each
+	// field again: a field added later is covered without editing this test.
+	doc, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	// The encoder writes a control byte as the six characters \u001b rather than
+	// the byte itself, so scanning the encoded bytes for 0x1b can never match --
+	// an earlier version of this test did exactly that and passed with the
+	// stripping removed. Both forms are checked.
+	if bytes.ContainsRune(doc, 0x1b) {
+		t.Errorf("a raw escape byte survived Normalize:\n%s", doc)
+	}
+	// Only the control range. The encoder also HTML-escapes >, < and & as
+	// \u003e, \u003c and \u0026, which are ordinary characters a constraint like
+	// ">=24" legitimately contains.
+	for _, esc := range []string{`\u000`, `\u001`} {
+		if bytes.Contains(doc, []byte(esc)) {
+			t.Errorf("an escaped control character (%s...) survived Normalize:\n%s", esc, doc)
+		}
 	}
 }

@@ -293,3 +293,171 @@ func TestNilSnapshotIsAnErrorNotAPanic(t *testing.T) {
 		t.Errorf("Marshal(nil) = %q, want an error", data)
 	}
 }
+
+// A document that parses as JSON but is too incomplete to describe an
+// environment must be refused at load, not diffed as "no differences".
+func TestLoadRejectsIncompleteDocument(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		doc  string
+	}{
+		// The bare document: no version, no name, nothing observed.
+		{"empty", `{}`},
+		// A name with no version stamp: the name is fine, so only the schema
+		// check can reject it.
+		{"no-schema-version", `{"name":"empty"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newStore(t)
+			if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+				t.Fatalf("MkdirAll() error = %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(s.dir(), "empty.json"), []byte(tt.doc), 0o600); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+
+			_, err := s.Load("empty")
+			if err == nil {
+				t.Fatal("Load() of an incomplete document returned no error")
+			}
+			if !strings.Contains(err.Error(), "empty") {
+				t.Fatalf("Load() error %q does not mention the snapshot name", err)
+			}
+		})
+	}
+}
+
+// A document whose name disagrees with the file it was loaded as is ambiguous
+// about which environment was meant, and must be refused.
+func TestLoadRejectsNameMismatch(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	doc := []byte(`{"schema_version":1,"name":"other","created_at":"2026-06-15T10:30:00Z"}`)
+	if err := os.WriteFile(filepath.Join(s.dir(), "local.json"), doc, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := s.Load("local")
+	if err == nil {
+		t.Fatal("Load() of a mismatched name returned no error")
+	}
+	if !strings.Contains(err.Error(), "local") {
+		t.Fatalf("Load() error %q does not mention the loaded name", err)
+	}
+}
+
+// A snapshot file larger than the read cap must be refused on size alone,
+// before it is ever parsed, so a hostile or generated file cannot exhaust
+// memory just by being loaded. The content is deliberately valid JSON padded
+// with an unknown field: if the size guard were missing, this document would
+// load fine, which is exactly what the guard exists to prevent.
+func TestLoadRejectsOversizedSnapshot(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	doc := `{"schema_version":1,"name":"huge","created_at":"2026-06-15T10:30:00Z","pad":"` +
+		strings.Repeat("x", maxSnapshotSize) + `"}`
+	if err := os.WriteFile(filepath.Join(s.dir(), "huge.json"), []byte(doc), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	_, err := s.Load("huge")
+	if err == nil {
+		t.Fatal("Load() of an oversized snapshot returned no error")
+	}
+	if !strings.Contains(err.Error(), "huge") {
+		t.Fatalf("Load() error %q does not mention the snapshot name", err)
+	}
+}
+
+// ADR 0002: purely additive optional fields stay compatible without a version
+// bump. A document carrying an unknown key must still load, as long as the
+// invariants this build understands hold.
+func TestLoadAllowsUnknownFields(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	doc := []byte(`{"schema_version":1,"name":"local","created_at":"2026-06-15T10:30:00Z","mystery_field":{"anything":1}}`)
+	if err := os.WriteFile(filepath.Join(s.dir(), "local.json"), doc, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got, err := s.Load("local")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Name != "local" {
+		t.Fatalf("Load() Name = %q, want %q", got.Name, "local")
+	}
+}
+
+// A snapshot that fails Validate (bad version, empty name, duplicated keys)
+// must be refused before anything is written to disk.
+func TestSaveRejectsInvalidSnapshot(t *testing.T) {
+	s := newStore(t)
+	bad := newTestSnapshot("local")
+	bad.SchemaVersion = 0
+	if err := s.Save(bad); err == nil {
+		t.Fatal("Save() of a schema_version 0 snapshot returned no error")
+	}
+	assertTreeEmpty(t, s.Root)
+}
+
+// A symlinked .nyrvo would route every write of a capture — the .gitignore and
+// the snapshot file itself — outside the repository. The store must refuse the
+// save rather than follow the link.
+func TestSaveRejectsSymlinkedNyrvo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	// The link target is a directory the user never consented to touch; the
+	// whole point of the guard is that nothing lands there.
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(repo, ".nyrvo")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	s := NewStore(repo)
+	if err := s.Save(newTestSnapshot("local")); err == nil {
+		t.Fatal("Save() through a symlinked .nyrvo returned no error")
+	}
+	if entries, err := os.ReadDir(target); err != nil {
+		t.Fatalf("ReadDir(target) error = %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("symlink target was written to: %v", entryNames(entries))
+	}
+}
+
+// Same for a symlinked .nyrvo/snapshots: the directory that actually receives
+// the snapshot files must be a real directory inside the repository.
+func TestSaveRejectsSymlinkedSnapshotsDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, DirName), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(repo, DirName, "snapshots")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	s := NewStore(repo)
+	if err := s.Save(newTestSnapshot("local")); err == nil {
+		t.Fatal("Save() through a symlinked snapshots dir returned no error")
+	}
+	if entries, err := os.ReadDir(target); err != nil {
+		t.Fatalf("ReadDir(target) error = %v", err)
+	} else if len(entries) != 0 {
+		t.Fatalf("symlink target was written to: %v", entryNames(entries))
+	}
+}

@@ -164,6 +164,7 @@ func defaultCollectors() []collector.Collector {
 		runtime.Python(),
 		runtime.Ruby(),
 		runtime.PHP(),
+		runtime.Composer(),
 		runtime.Rust(),
 		runtime.Java(),
 		runtime.DotNet(),

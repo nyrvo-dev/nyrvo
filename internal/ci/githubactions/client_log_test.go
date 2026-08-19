@@ -115,3 +115,17 @@ func TestFetchJobLogOtherFailureNotRetried(t *testing.T) {
 		t.Errorf("Exec called %d times, want 1 (no retry)", len(rec.args))
 	}
 }
+
+func TestFetchJobLogRejectsOversizedLog(t *testing.T) {
+	huge := make([]byte, maxJobLogSize+1)
+	rec := &execRecorder{outs: [][]byte{huge}}
+	client := &Client{Exec: rec.exec}
+
+	_, err := client.FetchJobLog(context.Background(), "cli/cli", 123)
+	if err == nil {
+		t.Fatal("FetchJobLog() error = nil, want size limit error")
+	}
+	if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error = %v, want log size limit message", err)
+	}
+}

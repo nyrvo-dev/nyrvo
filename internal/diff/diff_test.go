@@ -418,6 +418,25 @@ func TestUnmeasuredKeysAreNotReportedAsDrift(t *testing.T) {
 	}
 }
 
+// A git probe that ran out of time leaves no Git section. Without the
+// unmeasured keys, that empty section would compare as "git not described".
+func TestUnmeasuredGitSectionIsNotReportedAsAbsence(t *testing.T) {
+	a := snapshot.New("local", time.Time{})
+	a.Unmeasured = []string{"git.sha", "git.branch", "git.dirty"}
+	b := snapshot.New("other", time.Time{})
+	b.Git = &snapshot.Git{SHA: "abc123", Branch: "main"}
+
+	res := Compare(a, b)
+	for _, d := range res.Differences {
+		if d.Component == ComponentGit {
+			t.Errorf("an unread git probe was reported as absence: %+v", d)
+		}
+	}
+	if !res.Unmeasured {
+		t.Error("Result.Unmeasured = false, want true")
+	}
+}
+
 // daemon_running is the case a one-sided rule would miss. It is a bool, so a
 // probe that ran out of time leaves a confident "false" that is
 // indistinguishable from an observation, and the difference reads as a change

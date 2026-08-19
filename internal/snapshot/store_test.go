@@ -101,6 +101,25 @@ func TestSavedFileModeIs0600(t *testing.T) {
 	}
 }
 
+func TestSavedDirectoryModeIs0700(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory permission bits are not meaningful on windows")
+	}
+	s := newStore(t)
+	if err := s.Save(newTestSnapshot("local")); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	for _, path := range []string{filepath.Join(s.Root, DirName), s.dir()} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat(%s) error = %v", path, err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("%s mode = %o, want 700", path, perm)
+		}
+	}
+}
+
 // Re-saving a name must replace the prior capture rather than failing or
 // accumulating duplicates: it is the documented way to refresh a snapshot.
 func TestSaveOverwritesExistingSnapshot(t *testing.T) {
@@ -145,7 +164,7 @@ func TestLoadMissingReturnsErrNotFound(t *testing.T) {
 
 func TestLoadInvalidJSONMentionsName(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	// A file that exists but is corrupt must surface as a parse error that
@@ -168,7 +187,7 @@ func TestLoadInvalidJSONMentionsName(t *testing.T) {
 // silently misread; the guard turns "quietly wrong diff" into "upgrade".
 func TestLoadRejectsNewerSchemaVersion(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	future := []byte(`{"schema_version": 999, "name": "future", "created_at": "2026-06-15T10:30:00Z"}`)
@@ -256,7 +275,7 @@ func TestListMissingDirIsEmpty(t *testing.T) {
 // only *.json files count as names and the result must be lexically sorted.
 func TestListSortedIgnoresNonJSONAndDirs(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	for _, name := range []string{"zeta.json", "alpha.json", "mid.json"} {
@@ -309,7 +328,7 @@ func TestLoadRejectsIncompleteDocument(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			s := newStore(t)
-			if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+			if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 				t.Fatalf("MkdirAll() error = %v", err)
 			}
 			if err := os.WriteFile(filepath.Join(s.dir(), "empty.json"), []byte(tt.doc), 0o600); err != nil {
@@ -331,7 +350,7 @@ func TestLoadRejectsIncompleteDocument(t *testing.T) {
 // about which environment was meant, and must be refused.
 func TestLoadRejectsNameMismatch(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	doc := []byte(`{"schema_version":1,"name":"other","created_at":"2026-06-15T10:30:00Z"}`)
@@ -355,7 +374,7 @@ func TestLoadRejectsNameMismatch(t *testing.T) {
 // load fine, which is exactly what the guard exists to prevent.
 func TestLoadRejectsOversizedSnapshot(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	doc := `{"schema_version":1,"name":"huge","created_at":"2026-06-15T10:30:00Z","pad":"` +
@@ -378,7 +397,7 @@ func TestLoadRejectsOversizedSnapshot(t *testing.T) {
 // invariants this build understands hold.
 func TestLoadAllowsUnknownFields(t *testing.T) {
 	s := newStore(t)
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		t.Fatalf("MkdirAll() error = %v", err)
 	}
 	doc := []byte(`{"schema_version":1,"name":"local","created_at":"2026-06-15T10:30:00Z","mystery_field":{"anything":1}}`)
@@ -459,5 +478,87 @@ func TestSaveRejectsSymlinkedSnapshotsDir(t *testing.T) {
 		t.Fatalf("ReadDir(target) error = %v", err)
 	} else if len(entries) != 0 {
 		t.Fatalf("symlink target was written to: %v", entryNames(entries))
+	}
+}
+
+// A symlinked snapshot file would make Load read a document the user never
+// saved under that name. Refuse rather than follow the link.
+func TestLoadRejectsSymlinkedSnapshotFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	foreign := filepath.Join(t.TempDir(), "foreign.json")
+	if err := os.WriteFile(foreign, []byte(`{"schema_version":1,"name":"local","created_at":"2026-06-15T10:30:00Z"}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(foreign) error = %v", err)
+	}
+	link := filepath.Join(s.dir(), "local.json")
+	if err := os.Symlink(foreign, link); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	if _, err := s.Load("local"); err == nil {
+		t.Fatal("Load() through a symlinked snapshot returned no error")
+	}
+}
+
+// writeGitignore must not follow a .gitignore symlink: WriteFile would create
+// or truncate the link target, which can live outside the repository.
+func TestSaveRefusesSymlinkedGitignore(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires privileges on windows")
+	}
+	repo := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(filepath.Join(repo, DirName), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	target := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(target, []byte(""), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.Symlink(target, filepath.Join(repo, DirName, ".gitignore")); err != nil {
+		t.Fatalf("Symlink() error = %v", err)
+	}
+
+	s := NewStore(repo)
+	if err := s.Save(newTestSnapshot("local")); err == nil {
+		t.Fatal("Save() through a symlinked .gitignore returned no error")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile(target) error = %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("symlink target was written to: %q", got)
+	}
+}
+
+// A snapshot mailed around can carry control bytes in fields that reach the
+// terminal. Load must strip them, not retain an ESC in Source.Ref.
+func TestLoadStripsControlBytesFromRef(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	doc := []byte(`{"schema_version":1,"name":"ci","created_at":"2026-06-15T10:30:00Z","source":{"kind":"github-actions","ref":"ci.yml#job\u001b]0;owned\u0007"}}`)
+	if err := os.WriteFile(filepath.Join(s.dir(), "ci.json"), doc, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	got, err := s.Load("ci")
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got.Source == nil {
+		t.Fatal("Source is nil")
+	}
+	if strings.ContainsRune(got.Source.Ref, 0x1b) || strings.ContainsRune(got.Source.Ref, 0x07) {
+		t.Fatalf("Ref retained a control sequence: %q", got.Source.Ref)
+	}
+	if got.Source.Ref != "ci.yml#job" {
+		t.Errorf("Ref = %q, want %q", got.Source.Ref, "ci.yml#job")
 	}
 }

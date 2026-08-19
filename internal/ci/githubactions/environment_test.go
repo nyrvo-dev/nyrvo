@@ -147,15 +147,21 @@ func TestSnapshotContainerWithUnknownRunner(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	// The container itself is evidence of the OS, so an unknown runner still
-	// yields a system; only the architecture falls back to amd64.
+	// yields a system; architecture is not guessed.
 	if snap.System == nil {
 		t.Fatal("System not set for a container'd job with an unknown runner")
 	}
-	if snap.System.OS != "linux" || snap.System.Arch != "amd64" {
-		t.Errorf("System = %+v, want linux/amd64", snap.System)
+	if snap.System.OS != "linux" {
+		t.Errorf("System.OS = %q, want linux", snap.System.OS)
+	}
+	if snap.System.Arch != "" {
+		t.Errorf("System.Arch = %q, want empty: architecture was not identified", snap.System.Arch)
 	}
 	if !containsNote(snap, "postgres:16") {
 		t.Error("container image should be noted")
+	}
+	if !containsNote(snap, "architecture was not guessed") {
+		t.Error("unknown-runner container should note that architecture was not guessed")
 	}
 }
 

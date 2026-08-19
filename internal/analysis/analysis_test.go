@@ -104,6 +104,15 @@ func TestBuildCarriesOnlyTheEnvironmentNamesTheDiagnosisMentions(t *testing.T) {
 	}
 }
 
+func TestBuildCarriesPartialRuntimes(t *testing.T) {
+	pinHome(t, homeDirFixture)
+	d := &diff.Result{PartialRuntimes: true}
+	in := Build(&snapshot.Snapshot{Name: "local"}, &snapshot.Snapshot{Name: "ci"}, d, nil, nil)
+	if !in.PartialRuntimes {
+		t.Error("PartialRuntimes was not carried; an agent would read silence as absence")
+	}
+}
+
 func TestBuildDropsCaptureTime(t *testing.T) {
 	pinHome(t, homeDirFixture)
 	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)

@@ -63,6 +63,9 @@ func Prompt(in Input) string {
 	if in.PartialEnvironment {
 		b.WriteString("\nINCOMPLETE ENVIRONMENT EVIDENCE\nOne side's environment variable list is incomplete. A variable absent from that list is not evidence that the variable was absent from that environment.\n")
 	}
+	if in.PartialRuntimes {
+		b.WriteString("\nINCOMPLETE RUNTIME EVIDENCE\nOne side's runtime list is incomplete. A runtime absent from that list is not evidence that the runtime was absent from that environment.\n")
+	}
 
 	b.WriteString("\nANSWER CONSTRAINTS\n")
 	b.WriteString("- Environment variable values are absent by design and will never be supplied. Do not ask for them or assume anything about their contents.\n")

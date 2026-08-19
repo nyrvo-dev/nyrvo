@@ -7,16 +7,28 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/nyrvo-dev/nyrvo/internal/textsafe"
 )
 
 // DefaultTimeout allows a local agent enough time to reason and respond while
 // still preventing a stalled process from blocking doctor indefinitely.
 const DefaultTimeout = 10 * time.Minute
+
+// maxPromptArgLen is a conservative margin under Windows' ~8191-character
+// CreateProcess limit. Prompts longer than this are passed on stdin with "-"
+// as the final argument so the disclosed argv stays within the platform cap.
+const maxPromptArgLen = 7000
+
+// stdinPromptArg is the placeholder argv element when the real prompt is on stdin.
+const stdinPromptArg = "-"
 
 // ErrUnavailable lets callers distinguish installation guidance from an agent
 // process that started and failed.
@@ -40,16 +52,17 @@ var agents = map[string]Agent{
 	"opencode": {name: "opencode", argv: []string{"opencode", "run"}},
 }
 
-type executeFunc func(ctx context.Context, argv []string, dir string) (stdout, stderr string, err error)
+type executeFunc func(ctx context.Context, argv []string, dir string, stdin io.Reader) (stdout, stderr string, err error)
 
-var execute executeFunc = func(ctx context.Context, argv []string, dir string) (string, string, error) {
+var execute executeFunc = func(ctx context.Context, argv []string, dir string, stdin io.Reader) (string, string, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	if stdin != nil {
+		cmd.Stdin = stdin
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	// A nil stdin is intentional: codex otherwise consumes Nyrvo's non-terminal
-	// stdin as additional input that was never part of the disclosed request.
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
 }
@@ -73,12 +86,19 @@ func Names() []string {
 
 func (a Agent) Name() string { return a.name }
 
+func (a Agent) usesStdinPrompt(prompt string) bool {
+	return runtime.GOOS == "windows" && len(prompt) > maxPromptArgLen
+}
+
 // Command returns the exact argument vector Analyze will execute. It exists so
 // the user can be shown what is about to run, which is only worth anything if
 // the two cannot drift apart.
 func (a Agent) Command(prompt string) []string {
 	argv := make([]string, len(a.argv), len(a.argv)+1)
 	copy(argv, a.argv)
+	if a.usesStdinPrompt(prompt) {
+		return append(argv, stdinPromptArg)
+	}
 	return append(argv, prompt)
 }
 
@@ -116,7 +136,12 @@ func (a Agent) Analyze(ctx context.Context, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
 	defer cancel()
 
-	stdout, stderr, err := execute(ctx, argv, dir)
+	var stdin io.Reader
+	if a.usesStdinPrompt(prompt) {
+		stdin = strings.NewReader(prompt)
+	}
+
+	stdout, stderr, err := execute(ctx, argv, dir, stdin)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return "", fmt.Errorf("%s not found: %w", a.name, ErrUnavailable)
@@ -148,50 +173,12 @@ func (a Agent) Analyze(ctx context.Context, prompt string) (string, error) {
 // for invisible data loss. The banner also says which model replied, which is
 // worth showing under a heading that claims to name the agent.
 func cleanOutput(output string) string {
-	return strings.TrimSpace(stripControlSequences(output))
-}
-
-func stripControlSequences(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] == 0x1b {
-			i = skipEscapeSequence(s, i+1)
-			continue
-		}
-		if s[i] < 0x20 && s[i] != '\n' && s[i] != '\t' {
-			i++
-			continue
-		}
-		b.WriteByte(s[i])
-		i++
-	}
-	return b.String()
-}
-
-func skipEscapeSequence(s string, i int) int {
-	if i >= len(s) {
-		return i
-	}
-	switch s[i] {
-	case '[':
-		for i++; i < len(s); i++ {
-			if s[i] >= 0x40 && s[i] <= 0x7e {
-				return i + 1
-			}
-		}
-	case ']':
-		for i++; i < len(s); i++ {
-			if s[i] == 0x07 {
-				return i + 1
-			}
-			if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-				return i + 2
-			}
-		}
-	default:
-		return i + 1
-	}
-	return len(s)
+	// The same stripper a snapshot goes through, differing only in keeping the
+	// newlines an answer is written in. Keeping a second copy here is how the
+	// two drifted apart: this one scanned bytes, so it mistook the tail of a
+	// multi-byte character for a control introducer and swallowed the rest of
+	// the line.
+	return strings.TrimSpace(textsafe.StripKeepingNewlines(output))
 }
 
 func firstLine(s string) string {

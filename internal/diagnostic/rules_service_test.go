@@ -179,3 +179,13 @@ func TestServiceRuleFindsTheOneMatchAmongSeveral(t *testing.T) {
 		}
 	}
 }
+
+func TestServiceRulesStayQuietWhenDockerPsWasUnmeasured(t *testing.T) {
+	ci := serviceSnapshot("test job", snapshot.SourceGitHubActions, "postgres:16")
+	local := serviceSnapshot("local", snapshot.SourceLocal)
+	local.Unmeasured = []string{"docker.services"}
+
+	if got := runServiceRules(ci, local); len(got) != 0 {
+		t.Fatalf("unmeasured services produced findings: %+v", got)
+	}
+}

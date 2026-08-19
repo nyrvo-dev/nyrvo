@@ -113,10 +113,17 @@ func (d *Docker) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 	// question was answered "none".
 	if docker.DaemonRunning {
 		services, serr := Services(ctx, run)
-		if serr == nil {
+		switch {
+		case serr == nil:
 			snap.Services = append(snap.Services, services...)
-		} else if ctx.Err() != nil {
+		case ctx.Err() != nil:
 			return ctx.Err()
+		case collector.IsTimeout(serr):
+			// docker ps ran out of time. Leaving Services empty would look
+			// like an observation of no containers, which is the same untruth
+			// ADR 0017 forbids for versions. Services are a list, not a diff
+			// key, so the mark is what keeps an unread probe from testifying.
+			snap.MarkUnmeasured("docker", "services")
 		}
 	}
 

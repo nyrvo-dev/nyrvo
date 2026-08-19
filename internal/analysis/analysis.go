@@ -48,6 +48,11 @@ type Input struct {
 	// list was incomplete. An agent that does not know this will read a silence
 	// as an absence.
 	PartialEnvironment bool `json:"partial_environment,omitempty"`
+	// PartialRuntimes is the same warning for the runtime list. A workflow
+	// states the runtimes it sets up and is silent about the rest of the
+	// runner image; without this flag an agent reads that silence as "CI has
+	// no python".
+	PartialRuntimes bool `json:"partial_runtimes,omitempty"`
 }
 
 // Build assembles the document from a diagnosis that already happened.
@@ -64,6 +69,7 @@ func Build(a, b *snapshot.Snapshot, d *diff.Result, findings []finding.Finding, 
 	if d != nil {
 		in.Differences = append([]diff.Difference(nil), d.Differences...)
 		in.PartialEnvironment = d.PartialEnvironment
+		in.PartialRuntimes = d.PartialRuntimes
 	}
 	mentioned := mentionedNames(in.Differences, in.Findings)
 	in.A = sanitize(a, mentioned)

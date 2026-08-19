@@ -41,7 +41,7 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		// A timeout here means git never answered even "are we in a work
 		// tree?", so not one of the three facts is known. A refusal is a
 		// genuine "not a repository" and keeps its existing absent behaviour.
-		return g.unobserved(ctx, snap, err, "sha", "branch", "dirty")
+		return g.classify(ctx, snap, err, nil, "sha", "branch", "dirty")
 	}
 
 	sha, err := g.run(ctx, "rev-parse", "HEAD")
@@ -49,12 +49,12 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		// rev-parse HEAD fails on a fresh repository that has no commits yet;
 		// that is "nothing to observe here", not a broken capture. Only a probe
 		// that ran out of time leaves the repository's state unknown.
-		return g.unobserved(ctx, snap, err, "sha", "branch", "dirty")
+		return g.classify(ctx, snap, err, nil, "sha", "branch", "dirty")
 	}
 
 	branch, err := g.run(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
-		return g.unobserved(ctx, snap, err, "branch", "dirty")
+		return g.classify(ctx, snap, err, &snapshot.Git{SHA: sha}, "branch", "dirty")
 	}
 	// A detached HEAD reports the literal "HEAD"; recording that string would
 	// confuse diffs, which expect a branch name or nothing at all.
@@ -62,9 +62,11 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 		branch = ""
 	}
 
+	partial := &snapshot.Git{SHA: sha, Branch: branch}
+
 	status, err := g.run(ctx, "status", "--porcelain")
 	if err != nil {
-		return g.unobserved(ctx, snap, err, "dirty")
+		return g.classify(ctx, snap, err, partial, "dirty")
 	}
 
 	snap.Git = &snapshot.Git{
@@ -79,37 +81,13 @@ func (g *Git) Collect(ctx context.Context, snap *snapshot.Snapshot) error {
 	return nil
 }
 
-// unobserved reports a probe that failed.
-//
-// The failure has to be classified, because the same silence can be three very
-// different answers. A cancelled outer context is the caller's own failure and
-// surfaces as itself, never as "no repository". A probe that ran out of time
-// proves nothing about the repository — git exists (the earlier probes ran) and
-// simply did not answer — so the facts it could not read are recorded as
-// unmeasured and the section is left absent, which is how runtime and docker
-// record a timed-out probe per ADR 0017. Anything else is a genuine refusal (a
-// directory that is not a work tree, a repository with no commits) and keeps
-// the existing absent behaviour.
-func (g *Git) unobserved(ctx context.Context, snap *snapshot.Snapshot, err error, keys ...string) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if collector.IsTimeout(err) {
-		for _, k := range keys {
-			snap.MarkUnmeasured("git", k)
-		}
-		return fmt.Errorf("git: %v: %w", err, collector.ErrUnavailable)
-	}
-	return unavailable(err)
-}
-
 // requireWorkTree verifies the directory is a Git work tree before probing it,
 // so the later rev-parse HEAD failure is unambiguous as the "no commits" case
 // rather than "not a repository".
 func (g *Git) requireWorkTree(ctx context.Context) error {
 	out, err := g.run(ctx, "rev-parse", "--is-inside-work-tree")
 	if err != nil {
-		return unavailable(err)
+		return err
 	}
 	if out != "true" {
 		return fmt.Errorf("not a git work tree: %w", collector.ErrUnavailable)
@@ -130,14 +108,47 @@ func (g *Git) run(ctx context.Context, args ...string) (string, error) {
 	return collector.Run(ctx, "git", full...)
 }
 
+// classify separates a failed git probe into the three outcomes ADR 0017
+// distinguishes. A cancelled capture is the caller's own failure and must
+// surface as itself. A probe that ran out of time did not observe absence, so
+// the keys it could not read are marked unmeasured — inventing a clean
+// checkout, or leaving git nil without that mark, would make the next diff
+// report a repository as missing. Everything else is a genuine "nothing here".
+//
+// Only the keys still unknown at the point of failure are passed: a timeout on
+// `git status` has already learned the sha and the branch, and marking those
+// unmeasured too would decline to compare facts Nyrvo actually holds. When
+// partial is non-nil, those facts are written into snap.Git so a diff can
+// compare them; Dirty stays at its zero value because a bool cannot mean
+// "unknown" and git.dirty is listed in keys instead.
+//
+// The result wraps ErrUnavailable rather than being nil. Returning nil would
+// have capture report the section as "ok" — a collector announcing success
+// for something it never observed.
+func (g *Git) classify(ctx context.Context, snap *snapshot.Snapshot, err error, partial *snapshot.Git, keys ...string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if collector.IsTimeout(err) {
+		for _, k := range keys {
+			snap.MarkUnmeasured("git", k)
+		}
+		if partial != nil {
+			snap.Git = partial
+		}
+		return fmt.Errorf("git: %v: %w", err, collector.ErrUnavailable)
+	}
+	return unavailable(err)
+}
+
 // unavailable labels an absent-repository cause with ErrUnavailable so callers
 // can classify it. It exists for the genuine refusals — no git binary, not a
 // work tree, no commits yet — which collector.Run does not map to ErrUnavailable
-// on its own. A probe that ran out of time is handled by Collect (unobserved)
-// before this is reached, and a cancelled context is the caller's own failure;
-// the guard is kept so a missed timeout can never be mislabeled as absence.
+// on its own. A probe deadline is handled by classify before this is reached,
+// and a cancelled context is the caller's own failure that must surface as
+// itself and never masquerade as "collector unavailable".
 func unavailable(err error) error {
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.Is(err, context.Canceled) {
 		return err
 	}
 	return fmt.Errorf("git unavailable: %w: %w", err, collector.ErrUnavailable)

@@ -227,11 +227,17 @@ func toolVersionsReqs(dir string) []snapshot.Requirement {
 	// asdf and mise both accept tool aliases; normalize only the known ones and
 	// keep the source identical so a duplicate alias resolves to one entry.
 	runtimeFor := map[string]string{
-		"nodejs": "node",
-		"node":   "node",
-		"golang": "go",
-		"go":     "go",
-		"python": "python",
+		"nodejs":      "node",
+		"node":        "node",
+		"golang":      "go",
+		"go":          "go",
+		"python":      "python",
+		"npm":         "npm",
+		"pnpm":        "pnpm",
+		"yarn":        "yarn",
+		"composer":    "composer",
+		"dotnet":      "dotnet",
+		"dotnet-core": "dotnet",
 	}
 	for alias, runtime := range extraToolVersionAliases() {
 		runtimeFor[alias] = runtime

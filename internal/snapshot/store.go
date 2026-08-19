@@ -85,11 +85,28 @@ func (s *Store) Save(snap *Snapshot) error {
 	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName)); err != nil {
 		return err
 	}
-	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName, "snapshots")); err != nil {
+	if err := s.checkNoSymlink(s.dir()); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(s.dir(), 0o755); err != nil {
+	if err := os.MkdirAll(s.dir(), 0o700); err != nil {
 		return fmt.Errorf("create snapshot directory: %w", err)
+	}
+	// A symlink can appear between the first check and MkdirAll on a hostile or
+	// racing filesystem. Re-check before writing anything through the tree.
+	if err := s.checkNoSymlink(filepath.Join(s.Root, DirName)); err != nil {
+		return err
+	}
+	if err := s.checkNoSymlink(s.dir()); err != nil {
+		return err
+	}
+	// MkdirAll only applies the mode to directories it creates, and an older
+	// 0755 tree would otherwise keep world-readable snapshots. Match the
+	// config store: directories 0700, files 0600.
+	if err := os.Chmod(filepath.Join(s.Root, DirName), 0o700); err != nil {
+		return fmt.Errorf("set snapshot directory permissions: %w", err)
+	}
+	if err := os.Chmod(s.dir(), 0o700); err != nil {
+		return fmt.Errorf("set snapshot directory permissions: %w", err)
 	}
 	if err := s.writeGitignore(); err != nil {
 		return err
@@ -159,11 +176,11 @@ func (s *Store) checkNoSymlink(path string) error {
 // tracks its snapshots can empty the file and keep it that way.
 func (s *Store) writeGitignore() error {
 	path := filepath.Join(s.Root, DirName, ".gitignore")
-	// Lstat, not Stat: a broken symlink passes Stat as "not present", and
-	// WriteFile would then create its target through the link — a write outside
-	// the repository. A link that resolves is skipped like any existing file:
-	// this file is written once and never overwritten.
-	if _, err := os.Lstat(path); err == nil {
+	info, err := os.Lstat(path)
+	if err == nil {
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%s is a symbolic link; refusing to write through it", path)
+		}
 		return nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("check %s: %w", path, err)
@@ -179,7 +196,11 @@ func (s *Store) Load(name string) (*Snapshot, error) {
 	if err := ValidateName(name); err != nil {
 		return nil, err
 	}
-	f, err := os.Open(s.path(name))
+	path := s.path(name)
+	if err := s.checkNoSymlink(path); err != nil {
+		return nil, fmt.Errorf("read snapshot %q: %w", name, err)
+	}
+	f, err := os.Open(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%q: %w", name, ErrNotFound)

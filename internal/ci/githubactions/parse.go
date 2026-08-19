@@ -2,6 +2,7 @@ package githubactions
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,13 +12,26 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// maxWorkflowSize caps how much of one workflow file is read. A repository can
+// contain generated or hostile YAML; refusing oversized files matches the cap
+// on snapshot and requirement sources.
+const maxWorkflowSize = 1 << 20 // 1 MiB
+
 // ParseFile reads and parses one workflow file, setting the returned
 // workflow's Path to the file it came from. A file that parses but declares no
 // jobs is not an error: it is simply a workflow with nothing to observe.
 func ParseFile(path string) (*Workflow, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxWorkflowSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if len(data) > maxWorkflowSize {
+		return nil, fmt.Errorf("%s: file exceeds %d bytes", path, maxWorkflowSize)
 	}
 
 	var raw map[string]any
@@ -158,7 +172,7 @@ func parseJob(id string, raw map[string]any) Job {
 			s := Service{ID: sid}
 			if m, ok := svc[sid].(map[string]any); ok {
 				s.Image, _ = scalarString(m["image"])
-				s.Env = stringMap(m["env"])
+				s.Env = stringMap(m["env"], &j.Notes, jobNote(id, "service "+strconv.Quote(sid)+" env has a non-scalar entry; it is not modelled"))
 			} else {
 				j.Notes = append(j.Notes, jobNote(id, "service "+strconv.Quote(sid)+" is not a mapping; not modelled"))
 			}
@@ -166,7 +180,7 @@ func parseJob(id string, raw map[string]any) Job {
 		}
 	}
 
-	j.Env = stringMap(raw["env"])
+	j.Env = stringMap(raw["env"], &j.Notes, jobNote(id, "env has a non-scalar entry; it is not modelled"))
 
 	if steps, ok := raw["steps"].([]any); ok {
 		for _, sv := range steps {
@@ -215,8 +229,8 @@ func parseStep(jobID string, v any, notes *[]string) Step {
 	s.Uses, _ = scalarString(m["uses"])
 	s.Run, _ = scalarString(m["run"])
 	s.WorkingDirectory, _ = scalarString(m["working-directory"])
-	s.With = stringMap(m["with"])
-	s.Env = stringMap(m["env"])
+	s.With = stringMap(m["with"], notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" with has a non-scalar entry; it is not modelled"))
+	s.Env = stringMap(m["env"], notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" env has a non-scalar entry; it is not modelled"))
 	if _, ok := m["if"]; ok {
 		*notes = append(*notes, jobNote(jobID, "step "+strconv.Quote(s.Name)+" if conditions are not modelled"))
 	}
@@ -282,19 +296,37 @@ func scalarList(list []any) ([]string, bool) {
 // stringMap keeps the scalar entries of a decoded mapping. Non-scalar values
 // cannot be reproduced faithfully as text, so they are dropped: an env block
 // is a list of literal assignments, and the literals are the only part Nyrvo
-// claims to understand.
-func stringMap(v any) map[string]string {
+// claims to understand. Skipping them is not silence — ADR 0006 requires a
+// note whenever a recognized construct is left unmodelled.
+func stringMap(v any, notes *[]string, skippedNote string) map[string]string {
+	if v == nil {
+		return nil
+	}
 	m, ok := v.(map[string]any)
 	if !ok {
+		noteSkipped(notes, skippedNote)
 		return nil
 	}
 	out := make(map[string]string, len(m))
+	skipped := false
 	for k, val := range m {
 		if s, ok := scalarString(val); ok {
 			out[k] = s
+		} else {
+			skipped = true
 		}
 	}
+	if skipped {
+		noteSkipped(notes, skippedNote)
+	}
 	return out
+}
+
+func noteSkipped(notes *[]string, msg string) {
+	if notes == nil || msg == "" {
+		return
+	}
+	*notes = append(*notes, msg)
 }
 
 // scalarString returns a scalar value in its literal text form. Integers,

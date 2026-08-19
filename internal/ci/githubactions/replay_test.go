@@ -325,7 +325,16 @@ func TestReplayNoStepsSerializesAsEmptyArray(t *testing.T) {
 // with no spaces, and a redaction that only matches one spelling prints the
 // other straight through.
 func TestReplayRedactsSecretsInAnySpelling(t *testing.T) {
-	for _, spelling := range []string{"${{ secrets.TOKEN }}", "${{secrets.TOKEN}}", "${{ SECRETS.TOKEN }}", "prefix ${{  secrets . TOKEN }}"} {
+	for _, spelling := range []string{
+		"${{ secrets.TOKEN }}",
+		"${{secrets.TOKEN}}",
+		"${{ SECRETS.TOKEN }}",
+		"prefix ${{  secrets . TOKEN }}",
+		"${{ secrets['TOKEN'] }}",
+		`${{ secrets["TOKEN"] }}`,
+		"${{secrets['TOKEN']}}",
+		`${{ secrets[ "TOKEN" ] }}`,
+	} {
 		plan := Replay(&Job{
 			ID:    "build",
 			Env:   map[string]string{"TOKEN": spelling},

@@ -70,6 +70,23 @@ func requirementUnsatisfied(in Input) []finding.Finding {
 				out = append(out, f)
 			}
 		}
+		// MarkUnusable does not append a Runtime, so a refusal would otherwise
+		// be invisible here — and when the other side is PartialRuntimes, the
+		// missing-runtime rule is also suppressed. The project still declared
+		// a requirement this machine could not satisfy.
+		for _, name := range unusableRuntimeNames(side) {
+			for _, req := range reqs {
+				if req.Runtime != name {
+					continue
+				}
+				f := unsatisfiedFinding(in, side, req, "installed, not usable")
+				if _, dup := seen[f]; dup {
+					continue
+				}
+				seen[f] = struct{}{}
+				out = append(out, f)
+			}
+		}
 	}
 	return out
 }

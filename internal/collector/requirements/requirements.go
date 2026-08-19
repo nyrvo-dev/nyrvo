@@ -69,6 +69,7 @@ func (r Requirements) Collect(_ context.Context, snap *snapshot.Snapshot) error 
 	reqs = append(reqs, goModReqs(dir)...)
 	reqs = append(reqs, nvmrcReqs(dir)...)
 	reqs = append(reqs, pythonVersionReqs(dir)...)
+	reqs = append(reqs, pythonPyprojectReqs(dir)...)
 	reqs = append(reqs, toolVersionsReqs(dir)...)
 	reqs = append(reqs, rubyVersionReqs(dir)...)
 	reqs = append(reqs, gemfileReqs(dir)...)

@@ -267,6 +267,135 @@ func TestGlobalJSONReqsMalformedOrWithoutSDKVersion(t *testing.T) {
 	})
 }
 
+func TestPyprojectRequiresPython(t *testing.T) {
+	// Real-shaped manifests, including both spellings that occur in the wild:
+	// spaces around the operators (">= 3.11, < 3.13.0a1") and a plain
+	// comma-separated range (">=3.11,<3.14").
+	tests := []struct {
+		name      string
+		pyproject string
+		want      string
+	}{
+		{"plain floor", "[project]\nname = \"app\"\nrequires-python = \">=3.10\"\n", ">=3.10"},
+		{"comma-separated range", "[project]\nname = \"app\"\nrequires-python = \">=3.11,<3.14\"\n", ">=3.11,<3.14"},
+		{"spaces around operators", "[project]\nname = \"app\"\nrequires-python = \">= 3.11, < 3.13.0a1\"\n", ">= 3.11, < 3.13.0a1"},
+		{"single quotes", "[project]\nname = \"app\"\nrequires-python = '>=3.10'\n", ">=3.10"},
+		{"comment on the assignment", "[project]\nname = \"app\"\nrequires-python = \">=3.11\"  # floor\n", ">=3.11"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			writeFile(t, dir, "pyproject.toml", tt.pyproject)
+
+			want := []snapshot.Requirement{{Runtime: "python", Constraint: tt.want, Source: "pyproject.toml requires-python"}}
+			if got := pythonPyprojectReqs(dir); !reflect.DeepEqual(got, want) {
+				t.Fatalf("pythonPyprojectReqs() = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPyprojectRequiresPythonIsNotMinimum(t *testing.T) {
+	// requires-python carries its own operators, so it must not be treated as a
+	// floor the way go.mod and Cargo.toml's rust-version are. Minimum staying
+	// false is what lets the constraint engine enforce the declared upper bound.
+	dir := t.TempDir()
+	writeFile(t, dir, "pyproject.toml", "[project]\nname = \"app\"\nrequires-python = \">=3.11,<3.14\"\n")
+
+	got := pythonPyprojectReqs(dir)
+	if len(got) != 1 {
+		t.Fatalf("pythonPyprojectReqs() = %v, want one requirement", got)
+	}
+	if got[0].Minimum {
+		t.Error("requires-python is not a floor; Minimum must stay false")
+	}
+	if got[0].Constraint != ">=3.11,<3.14" {
+		t.Errorf("Constraint = %q, want %q", got[0].Constraint, ">=3.11,<3.14")
+	}
+}
+
+func TestPyprojectRequiresPythonOnlyInProjectTable(t *testing.T) {
+	// A decoy line in [project.optional-dependencies] must never be read as the
+	// [project] table's requires-python: the table match is exact.
+	dir := t.TempDir()
+	writeFile(t, dir, "pyproject.toml", `[project]
+name = "app"
+requires-python = ">=3.11"
+
+[project.optional-dependencies]
+dev = ["requires-python = \">=99\""]
+`)
+
+	if got := pythonPyprojectReqs(dir); len(got) != 1 {
+		t.Fatalf("pythonPyprojectReqs() = %v, want one requirement", got)
+	} else if got[0].Constraint != ">=3.11" {
+		t.Fatalf("Constraint = %q, want %q (decoy table was read)", got[0].Constraint, ">=3.11")
+	}
+}
+
+func TestPyprojectBothPythonVersionAndPyproject(t *testing.T) {
+	// A project may carry both .python-version and pyproject.toml. They are
+	// different sources making different claims, and collapsing them would hide
+	// a project whose two files disagree — which is itself worth seeing.
+	dir := t.TempDir()
+	writeFile(t, dir, ".python-version", "3.11.3\n")
+	writeFile(t, dir, "pyproject.toml", "[project]\nname = \"app\"\nrequires-python = \">=3.11,<3.14\"\n")
+
+	want := []snapshot.Requirement{
+		{Runtime: "python", Constraint: "3.11.3", Source: ".python-version"},
+		{Runtime: "python", Constraint: ">=3.11,<3.14", Source: "pyproject.toml requires-python"},
+	}
+	if got := pythonVersionReqs(dir); len(got) != 1 || !reflect.DeepEqual(got[0], want[0]) {
+		t.Fatalf("pythonVersionReqs() = %v, want %v", got, want[0])
+	}
+	if got := pythonPyprojectReqs(dir); !reflect.DeepEqual(got, want[1:]) {
+		t.Fatalf("pythonPyprojectReqs() = %v, want %v", got, want[1:])
+	}
+}
+
+func TestPyprojectRequiresPythonMalformedYieldsNothing(t *testing.T) {
+	t.Run("absent file", func(t *testing.T) {
+		if got := pythonPyprojectReqs(t.TempDir()); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("no project table", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "pyproject.toml", "[tool.poetry]\nrequires-python = \">=3.11\"\n")
+		if got := pythonPyprojectReqs(dir); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("no requires-python key", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "pyproject.toml", "[project]\nname = \"app\"\n")
+		if got := pythonPyprojectReqs(dir); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("empty value", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "pyproject.toml", "[project]\nname = \"app\"\nrequires-python = \"\"\n")
+		if got := pythonPyprojectReqs(dir); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("unquoted value", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "pyproject.toml", "[project]\nname = \"app\"\nrequires-python = >=3.11\n")
+		if got := pythonPyprojectReqs(dir); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+	t.Run("requires-python outside project table", func(t *testing.T) {
+		dir := t.TempDir()
+		writeFile(t, dir, "pyproject.toml", "[project.urls]\nrequires-python = \">=3.11\"\n")
+		if got := pythonPyprojectReqs(dir); got != nil {
+			t.Fatalf("pythonPyprojectReqs() = %v, want nil", got)
+		}
+	})
+}
+
 func TestExtraToolVersionAliases(t *testing.T) {
 	want := map[string]string{
 		"java":    "java",
